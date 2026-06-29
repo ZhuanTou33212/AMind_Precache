@@ -59,8 +59,10 @@ var defaultLabelsConfig = []byte(`{
       "options": [
         { "id": "amazing", "label": "惊艳", "hotkey": "Q", "aliases": ["惊艳"] },
         { "id": "good", "label": "好看", "hotkey": "W", "aliases": ["好看"] },
-        { "id": "normal", "label": "一般", "hotkey": "E", "aliases": ["一般"] },
-        { "id": "bad", "label": "不堪", "hotkey": "R", "aliases": ["不堪"] }
+        { "id": "nice", "label": "还不错", "hotkey": "E", "aliases": ["还不错"] },
+        { "id": "normal", "label": "一般", "hotkey": "R", "aliases": ["一般"] },
+        { "id": "bad", "label": "不堪", "hotkey": "T", "aliases": ["不堪"] },
+        { "id": "border", "label": "带边框", "hotkey": "Y", "aliases": ["带边框", "边框", "frame"] }
       ]
     },
     {
@@ -69,7 +71,7 @@ var defaultLabelsConfig = []byte(`{
       "mode": "multi",
       "required": false,
       "options": [
-        { "id": "watermark", "label": "带水印", "hotkey": "A", "aliases": ["带水印", "水印", "logo"] }
+        { "id": "watermark_yes", "label": "带水印", "hotkey": "A", "aliases": ["带水印", "水印", "logo"] }
       ]
     }
   ],
@@ -755,6 +757,7 @@ var labelValue = map[string]int{
 	"还不错":  3,
 	"一般":   0,
 	"不堪":   -1,
+	"带边框":  4,
 	"带水印":  1,
 }
 
@@ -766,9 +769,10 @@ func mapLabelsToPayload(labels map[string][]string) map[string]int {
 			if !ok {
 				continue
 			}
-			if groupID == "quality" {
+			switch groupID {
+			case "quality":
 				payload["level"] = num
-			} else if groupID == "watermark" {
+			case "watermark":
 				payload["watermark"] = num
 			}
 		}

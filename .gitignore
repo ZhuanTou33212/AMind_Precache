@@ -8,6 +8,10 @@ data/cache.db
 data/images/
 data/placeholder-cache-test/
 
+# Compiled runtime data in source dir
+src-aminer-desktop/data/
+src-aminer-desktop/aminer-desktop.exe
+
 # Backups
 _backups/
 
