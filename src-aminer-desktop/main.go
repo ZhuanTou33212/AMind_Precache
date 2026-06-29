@@ -573,6 +573,13 @@ func main() {
 			return
 		}
 
+		// Get resp_id from bench/questions API
+		respID, err := getRespID(config.TaskID, record.PromptID)
+		if err != nil {
+			http.Error(w, "resp_id not found: "+err.Error(), 500)
+			return
+		}
+
 		// Find assignment_id by searching prompts API for the prompt_id
 		assignmentID := findAssignmentID(config.TaskID, config.StartDate, record.PromptID, record.QuestionNum)
 		if assignmentID == 0 {
@@ -582,7 +589,6 @@ func main() {
 
 		// Construct payload
 		payload := mapLabelsToPayload(req.Labels)
-		respID := genUUID()
 		body := map[string]interface{}{
 			"assignment_id": assignmentID,
 			"tagger_id":     req.TaggerID,
@@ -675,6 +681,31 @@ func genUUID() string {
 func mustAtoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+// getRespID calls bench/questions API and extracts the first response's id (resp_id)
+func getRespID(taskID, promptID string) (string, error) {
+	url := annotBase() + "/api/v1/bench/questions/" + promptID + "?uid="
+	resp, err := doAMinerGet(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var data struct {
+		Responses []struct {
+			ID       string `json:"id"`
+			PromptID string `json:"prompt_id"`
+		} `json:"responses"`
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if json.Unmarshal(body, &data) != nil {
+		return "", fmt.Errorf("failed to parse bench/questions response")
+	}
+	if len(data.Responses) == 0 {
+		return "", fmt.Errorf("no responses in bench/questions for %s", promptID)
+	}
+	log.Printf("[SUBMIT] got resp_id=%s for prompt=%s", data.Responses[0].ID, promptID)
+	return data.Responses[0].ID, nil
 }
 
 // findAssignmentID searches the prompts API for the assignment_id matching a given prompt_id

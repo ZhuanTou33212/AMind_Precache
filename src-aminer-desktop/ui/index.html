@@ -183,6 +183,8 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
       <div class="slot-actions">
         <button class="btn primary" onclick="requestCompletedWebSubmit(false)">提交所选到网页</button>
         <button class="btn" onclick="requestCompletedWebSubmit(true)">全部提交到网页</button>
+        <button class="btn" style="background:#14b8a6;color:#fff" onclick="requestDirectAPISubmit(false)">⚡直接提交到平台</button>
+        <button class="btn" onclick="requestDirectAPISubmit(true)">⚡全部直接提交</button>
         <button class="btn" onclick="clearSlotSelection('completed')">取消选择</button>
         <button class="btn danger" id="flushQueueBtn" onclick="flushSubmitQueue()" style="display:none">清空队列</button>
       </div>
@@ -684,6 +686,24 @@ function flushSubmitQueue(){
   webSubmitQueue=[];webSubmitRunning=false;webSubmitTotal=0;webSubmitDone=0;
   $('#queueProgress').style.display='none';$('#flushQueueBtn').style.display='none';
   toast('提交队列已清空');
+}
+
+async function requestDirectAPISubmit(all){
+  var imgs=all?cachedImages.filter(isCompleted):selectedSlotImages('completed');
+  imgs=imgs.filter(function(img){return img.labelText&&img.labelStatus!=='cloud_submitted'});
+  if(!imgs.length)return toast(all?'已完成槽暂无可提交图片':'请先选择已完成图片','#d94848');
+  toast('开始直接提交 '+imgs.length+' 张...');
+  var ok=0,fail=0;
+  for(var i=0;i<imgs.length;i++){
+    var img=imgs[i];
+    try{
+      var r=await api('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hash:img.hash,labels:img.labels})});
+      if(r.ok){ok++;img.labelStatus='cloud_submitted'}
+      else{fail++;console.error('submit failed:',r);toast('失败: '+img.questionNum+' '+(r.body||r.status),'#d94848')}
+    }catch(e){fail++;toast('错误: '+img.questionNum+' '+e.message,'#d94848')}
+  }
+  await refreshImages({sync:false});
+  toast('直接提交完成: OK='+ok+' 失败='+fail);
 }
 
 function showLayerInPreview(slot){
