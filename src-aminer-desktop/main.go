@@ -89,6 +89,8 @@ type monState struct {
 	Count    int `json:"count"`
 }
 
+var respCache = map[string]string{} // prompt_id → resp_id (learned from web submissions)
+var respCacheMu sync.Mutex
 var mon = &monState{}
 var monPage = 0 // which page to poll for annotation changes
 var monRunning = false
@@ -485,13 +487,27 @@ func main() {
 			if t, _ := raw["type"].(string); t == "captured-submission-api" {
 				log.Printf("[CAPTURED API] %v %v status=%v body=%v",
 					raw["method"], raw["url"], raw["status"], raw["requestBody"])
+				// Store real resp_id from web submission for direct API use
+				if rb, ok := raw["requestBody"].(string); ok {
+					var sub struct {
+						PromptID string `json:"prompt_id"`
+						Responses []struct {
+							RespID string `json:"resp_id"`
+						} `json:"responses"`
+					}
+					if json.Unmarshal([]byte(rb), &sub) == nil && sub.PromptID != "" && len(sub.Responses) > 0 && sub.Responses[0].RespID != "" {
+						respCacheMu.Lock()
+						respCache[sub.PromptID] = sub.Responses[0].RespID
+						respCacheMu.Unlock()
+						log.Printf("[SUBMIT] Cached real resp_id %s for prompt %s", sub.Responses[0].RespID, sub.PromptID)
+					}
+				}
 				// Auto-extract tagger_id from first captured submission
 				if rb, ok := raw["requestBody"].(string); ok && config.TaggerID == "" {
 					var sub struct{ TaggerID string `json:"tagger_id"` }
 					if json.Unmarshal([]byte(rb), &sub) == nil && sub.TaggerID != "" {
 						config.TaggerID = sub.TaggerID
 						log.Printf("[SUBMIT] Auto-configured tagger_id=%s", config.TaggerID)
-						// Persist immediately
 						b, _ := json.Marshal(config)
 						os.WriteFile(filepath.Join(dataDir, "config.json"), b, 0644)
 						st.SaveConfig(b)
@@ -579,11 +595,19 @@ func main() {
 			return
 		}
 
-		// Get resp_id from bench/questions API
-		respID, err := getRespID(config.TaskID, record.PromptID)
-		if err != nil {
-			http.Error(w, "resp_id not found: "+err.Error(), 500)
-			return
+		// Get resp_id: prefer cached from web submission, fallback to bench/questions API
+		respCacheMu.Lock()
+		respID, hasCached := respCache[record.PromptID]
+		respCacheMu.Unlock()
+		if !hasCached {
+			var err error
+			respID, err = getRespID(record.PromptID)
+			if err != nil {
+				http.Error(w, "resp_id not found (no prior web submit for this question): "+err.Error(), 500)
+				return
+			}
+		} else {
+			log.Printf("[SUBMIT] Using cached resp_id %s for prompt %s", respID, record.PromptID)
 		}
 
 		// Find assignment_id by searching prompts API for the prompt_id
@@ -696,7 +720,7 @@ func mustAtoi(s string) int {
 }
 
 // getRespID calls bench/questions API and extracts the first response's id (resp_id)
-func getRespID(taskID, promptID string) (string, error) {
+func getRespID(promptID string) (string, error) {
 	url := annotBase() + "/api/v1/bench/questions/" + promptID + "?uid="
 	resp, err := doAMinerGet(url)
 	if err != nil {
