@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMiner 预缓存系统 — 使用说明</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0b1220;color:#e5edf7;font:14px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:32px;max-width:900px;margin:0 auto}
+h1{font-size:24px;color:#7dd3c7;margin-bottom:8px;padding-bottom:16px;border-bottom:1px solid rgba(148,163,184,.2)}
+h2{font-size:18px;color:#a5b4fc;margin:32px 0 12px}
+h3{font-size:15px;color:#93a4bc;margin:16px 0 8px}
+p{margin:8px 0}
+code{background:#1e293b;padding:2px 6px;border-radius:4px;font-size:13px;color:#facc15}
+pre{background:#0f172a;border:1px solid rgba(148,163,184,.2);border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0;font-size:12px;line-height:1.6}
+.step{background:#111827;border-left:4px solid #0f9f8f;padding:12px 16px;margin:12px 0;border-radius:0 8px 8px 0}
+.step .num{display:inline-block;width:24px;height:24px;background:#0f9f8f;color:#fff;border-radius:50%;text-align:center;line-height:24px;font-size:12px;margin-right:8px;font-weight:700}
+.warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:12px 16px;border-radius:8px;margin:12px 0;color:#facc15}
+.note{background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);padding:12px 16px;border-radius:8px;margin:12px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0}
+th,td{border:1px solid rgba(148,163,184,.2);padding:8px 12px;text-align:left;font-size:13px}
+th{background:#1e293b;color:#a5b4fc}
+li{margin:4px 0 4px 20px}
+</style>
+</head>
+<body>
+
+<h1>📦 AMiner 预缓存系统</h1>
+<p>版本 2.0 | 2026-06-18</p>
+
+<h2>项目简介</h2>
+<p>本系统为 AMiner 标注平台提供<strong>图片预缓存</strong>功能。将 OSS 云端图片提前下载到本地，标注页面直接从本机加载图片，实现秒开效果。</p>
+
+<h2>文件结构</h2>
+<pre>
+AMiner预缓存系统/
+├── aminer-desktop.exe   ← 桌面应用（双击启动）
+├── 使用说明.html          ← 本文档
+├── extension/            ← Chrome/Edge 扩展
+│   ├── manifest.json
+│   ├── background.js     ← Service Worker（核心预缓存逻辑）
+│   ├── monitor.js        ← 内容脚本（图片替换）
+│   └── monitor-main.js   ← 主世界脚本（提交检测）
+└── data/                 ← 缓存数据（自动生成）
+    ├── config.json
+    ├── cache.db          ← SQLite 数据库
+    └── images/           ← 图片文件
+</pre>
+
+<h2>快速开始</h2>
+
+<div class="step"><span class="num">1</span> <strong>启动桌面应用</strong><br>双击 <code>aminer-desktop.exe</code>，黑色终端窗口不要关闭。</div>
+
+<div class="step"><span class="num">2</span> <strong>加载扩展</strong><br>打开 Edge → <code>edge://extensions/</code> → 开启「开发人员模式」→「加载解压缩的扩展」→ 选择 <code>extension/</code> 文件夹。</div>
+
+<div class="step"><span class="num">3</span> <strong>获取 Token</strong><br>打开标注页面 → F12 → Console → 输入 <code>允许粘贴</code> 回车 → 粘贴：</div>
+<pre>var _s=XMLHttpRequest.prototype.setRequestHeader;
+XMLHttpRequest.prototype.setRequestHeader=function(k,v){
+  if(k.toLowerCase()==='authorization') console.log('TOKEN:',v.replace('Bearer ',''));
+  return _s.apply(this,arguments);
+}</pre>
+<p>点标注页任意数字键提交一次，Console 出现 <code>TOKEN: eyJhbGci...</code>，复制这段。</p>
+
+<div class="step"><span class="num">4</span> <strong>配置</strong><br>打开 <code>http://127.0.0.1:9800/</code> → 粘贴 Token → 点「💾 保存」。</div>
+
+<div class="step"><span class="num">5</span> <strong>开始使用</strong><br>正常标注即可。系统自动预取 50 张图片、替换页面图片 URL 为本地地址。</div>
+
+<h2>工作原理</h2>
+<table>
+  <tr><th>组件</th><th>作用</th></tr>
+  <tr><td>exe</td><td>本地服务器 (9800端口) + SQLite + 图片存储</td></tr>
+  <tr><td>background.js</td><td>调用 AMiner API 获取题目 → 下载图片 → 管理缓存</td></tr>
+  <tr><td>monitor.js</td><td>接收缓存列表 → 替换页面 img.src 为 localhost</td></tr>
+  <tr><td>monitor-main.js</td><td>检测标注提交 → 触发缓存更新</td></tr>
+</table>
+
+<div class="warn">
+  <strong>⚠️ 注意</strong><br>
+  • exe 必须保持运行<br>
+  • Token 约 2 小时过期，过期需重新获取<br>
+  • 缓存容量 50 张，自动轮替<br>
+  • 支持跨页获取（自动翻页）
+</div>
+
+</body>
+</html>

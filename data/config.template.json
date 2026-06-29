@@ -1,0 +1,129 @@
+{
+  "$schema": "aminer-desktop-config",
+  "version": "2.0",
+
+  "server": {
+    "_comment": "本地桌面服务配置",
+    "host": "127.0.0.1",
+    "port": 9800
+  },
+
+  "platform": {
+    "_comment": "标注平台地址 (自动从页面 origin 获取，初次可手动填写)",
+    "url": "http://10.9.172.235:10089"
+  },
+
+  "auth": {
+    "_comment": "认证 Token (从 annot 页面 localStorage['Access-Token'] 获取)",
+    "token": ""
+  },
+
+  "task": {
+    "_comment": "任务参数 (从 URL label_page_feed/{taskId}?start={startDate} 获取)",
+    "taskId": "",
+    "startDate": ""
+  },
+
+  "cache": {
+    "_comment": "图片缓存参数",
+    "maxSize": 200,
+    "groupSize": 200,
+    "pageSize": 20
+  },
+
+  "oss": {
+    "_comment": "OSS CDN 图片源",
+    "host": "mm-group-image.oss-cn-beijing.aliyuncs.com"
+  },
+
+  "browser": {
+    "_comment": "Edge 浏览器路径 (多路径依次尝试)",
+    "executable": [
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+    ],
+    "debugPort": 9224,
+    "profile": ""
+  },
+
+  "extension": {
+    "_comment": "浏览器扩展配置",
+    "id": "",
+    "path": ""
+  },
+
+  "timing": {
+    "_comment": "轮询间隔 / 超时 (毫秒，除非注明)",
+    "polling": {
+      "annotationMs": 5000,
+      "configMs": 30000,
+      "cacheListMs": 1000,
+      "submitCheckMs": 30000,
+      "pageInfoMs": 3000
+    },
+    "ui": {
+      "imageRefreshMs": 2000,
+      "statusRefreshMs": 1000,
+      "toastAutoCloseMs": 2000
+    },
+    "http": {
+      "timeoutSeconds": 30
+    },
+    "retry": {
+      "topmostMaxTries": 20,
+      "topmostDelayMs": 250,
+      "browserLaunchDelayMs": 500
+    }
+  },
+
+  "submission": {
+    "_comment": "提交参数",
+    "enabled": false,
+    "batchSize": 5,
+    "strategy": "keyboard",
+    "pollIntervalMs": 2000,
+    "pollMaxTries": 30,
+    "stepDelayMs": 500,
+    "prelabelStepDelayMs": 50,
+    "prelabelBatchDelayMs": 150,
+    "postSubmitDelayMs": 1200,
+    "busyLockResetMs": 1200
+  },
+
+  "ui": {
+    "_comment": "UI 参数",
+    "title": "AMiner Image Prefetch",
+    "questionRangeMin": 1,
+    "questionRangeMax": 2000,
+    "defaultPrefetchCount": 10,
+    "gridPageSizes": [30, 60, 120],
+    "defaultGridPageSize": 30
+  },
+
+  "labels": {
+    "_comment": "标签配置 (可通过 /api/labels-config 在线编辑)",
+    "groups": [
+      {
+        "id": "quality",
+        "name": "图片质量",
+        "mode": "single",
+        "required": true,
+        "options": [
+          { "id": "amazing", "label": "惊艳", "hotkey": "Q", "aliases": ["惊艳"] },
+          { "id": "good", "label": "好看", "hotkey": "W", "aliases": ["好看"] },
+          { "id": "normal", "label": "一般", "hotkey": "E", "aliases": ["一般"] },
+          { "id": "bad", "label": "不堪", "hotkey": "R", "aliases": ["不堪"] }
+        ]
+      },
+      {
+        "id": "watermark",
+        "name": "水印",
+        "mode": "multi",
+        "required": false,
+        "options": [
+          { "id": "watermark_yes", "label": "带水印", "hotkey": "A", "aliases": ["带水印", "水印", "logo"] }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AMiner 图片预缓存系统 使用说明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #647084;
+      --line: #dce3ee;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --code-bg: #101827;
+      --code-text: #eef5ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    article {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 40px;
+      box-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 30px;
+      line-height: 1.25;
+    }
+
+    h2 {
+      margin: 34px 0 12px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      font-size: 22px;
+      line-height: 1.35;
+    }
+
+    h2:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    p {
+      margin: 12px 0;
+    }
+
+    ul,
+    ol {
+      margin: 10px 0 16px 24px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: var(--accent-soft);
+      color: #0b5f59;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 0.94em;
+    }
+
+    pre {
+      margin: 14px 0 18px;
+      padding: 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-text);
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: 14px;
+    }
+
+    .lead {
+      margin: 0 0 28px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .note {
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 6px;
+    }
+
+    @media (max-width: 640px) {
+      main {
+        padding: 20px 12px 48px;
+      }
+
+      article {
+        padding: 24px 18px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <h1>AMiner 图片预缓存系统 使用说明</h1>
+      <p class="lead">解压后双击启动脚本，即可打开本地缓存服务和 AMiner 标注页面。</p>
+
+      <h2>文件说明</h2>
+      <ul>
+        <li><code>aminer-desktop.exe</code>: 本地缓存服务，提供 <code>http://127.0.0.1:9800</code></li>
+        <li><code>extension/</code>: 浏览器扩展，负责自动同步 Token、预取图片、替换页面图片地址</li>
+        <li><code>extension/settings.json</code>: 缓存数量默认配置，当前默认 <code>200</code></li>
+        <li><code>启动_AMiner预缓存.bat</code>: 双击启动本地服务并打开 Edge 标注页面</li>
+        <li><code>启动_AMiner预缓存.ps1</code>: PowerShell 启动脚本</li>
+      </ul>
+
+      <h2>第一次使用</h2>
+      <ol>
+        <li>解压整个文件夹到本机任意位置。</li>
+        <li>双击运行 <code>启动_AMiner预缓存.bat</code>。</li>
+        <li>如果 Windows 提示脚本执行限制，可执行：</li>
+      </ol>
+      <pre><code>powershell -ExecutionPolicy Bypass -File .\启动_AMiner预缓存.ps1</code></pre>
+      <ol start="4">
+        <li>Edge 打开后登录 AMiner 标注页面。</li>
+        <li>正常进入标注页后，扩展会自动同步 Token、任务 ID 和日期到本地服务。</li>
+        <li>等待缓存数量增长，页面图片会逐步切换为本机加载。</li>
+      </ol>
+
+      <h2>修改缓存数量</h2>
+      <p>标注页面左下角会出现缓存控制条：<code>已缓存 X 张 / 目标 [输入框] 保存</code>。直接输入想要预缓存的图片数量并点击“保存”即可生效；这个值会保存在当前 Edge 扩展配置里，下次打开仍会使用。</p>
+      <p>也可以在分发前编辑 <code>extension/settings.json</code> 作为默认值：</p>
+      <pre><code>{
+  "cacheSize": 200
+}</code></pre>
+      <p>支持范围: 大于等于 <code>1</code>，程序不再设置人为最大上限。数字越大，首次预取越慢，占用磁盘越多，但后续标注等待图片的概率越低；实际可缓存数量仍受任务剩余图片数量和本机资源影响。</p>
+      <p>如果只修改 <code>extension/settings.json</code>，请关闭 Edge 后重新运行 <code>启动_AMiner预缓存.bat</code>。</p>
+
+      <h2>修改标注入口</h2>
+      <p>打开 <code>启动_AMiner预缓存.ps1</code>，修改顶部的 <code>$StartUrl</code>：</p>
+      <pre><code>$StartUrl = 'https://annot.aminer.cn/project/label_page_feed/181903?start=1781830800'</code></pre>
+      <p>其中：</p>
+      <ul>
+        <li><code>181903</code> 是任务 ID</li>
+        <li><code>start=...</code> 是 AMiner 页面日期参数</li>
+      </ul>
+
+      <h2>日常使用</h2>
+      <ol>
+        <li>运行 <code>启动_AMiner预缓存.bat</code></li>
+        <li>在打开的 Edge 里正常标注</li>
+        <li>不需要手动复制 Token</li>
+      </ol>
+
+      <h2>故障排查</h2>
+      <ul>
+        <li>图片不缓存：确认 <code>aminer-desktop.exe</code> 正在运行，且 Edge 加载了 <code>extension/</code></li>
+        <li>缓存数量不变：刷新标注页，或关闭 Edge 后重新运行启动脚本</li>
+        <li><code>401</code> / <code>invalid signature</code>：Token 过期，刷新 AMiner 页面并重新登录</li>
+        <li>页面提示没有数据：检查 <code>$StartUrl</code> 里的 <code>start</code> 日期是否是当前可用日期</li>
+        <li>端口被占用：关闭已有的 <code>aminer-desktop.exe</code> 后重试</li>
+      </ul>
+
+      <h2>不要分发的数据</h2>
+      <div class="note">
+        不要把运行后生成的 <code>data/</code> 目录发给别人。里面可能包含 Token、SQLite 缓存和图片文件。
+      </div>
+    </article>
+  </main>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Binaries
+*.exe
+*.zip
+
+# Runtime data (contains secrets)
+data/config.json
+data/cache.db
+data/images/
+data/placeholder-cache-test/
+
+# Backups
+_backups/
+
+# Go toolchain
+_tools/
+
+# Editor
+.codegraph/

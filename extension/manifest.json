@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "AMiner Realtime Monitor Bridge",
+  "version": "1.17",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:9800/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://annot.aminer.cn/project/label_page_feed/*",
+        "http://10.9.172.235:13000/project/label_page_feed/*"
+      ],
+      "js": [
+        "monitor.js",
+        "monitor-quicklabel.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://annot.aminer.cn/project/label_page_feed/*",
+        "http://10.9.172.235:13000/project/label_page_feed/*"
+      ],
+      "js": [
+        "monitor-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}

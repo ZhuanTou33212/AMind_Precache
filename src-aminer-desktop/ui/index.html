@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMiner Image Prefetch</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0b1220;color:#e5edf7;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px;min-height:100vh}
+h1{font-size:18px;margin-bottom:12px}
+.panel{background:#111827;border:1px solid rgba(148,163,184,.2);border-radius:8px;padding:14px;margin-bottom:14px}
+.panel h2{font-size:14px;margin-bottom:10px;color:#93a4bc}
+.row{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
+.row label{font-size:12px;color:#93a4bc;min-width:50px}
+input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-radius:5px;padding:7px 10px;color:#e5edf7;font-size:12px;min-width:120px}
+.btn{border:1px solid rgba(148,163,184,.4);border-radius:5px;padding:7px 14px;cursor:pointer;font-size:12px;color:#e5edf7;background:#263656;white-space:nowrap}
+.btn:hover{background:#304267}
+.btn.primary{background:#0f9f8f;border-color:rgba(15,159,143,.4)}
+.btn.primary:hover{background:#14b8a6}
+.btn.danger{background:rgba(239,68,68,.25)}
+.btn.danger:hover{background:rgba(239,68,68,.4)}
+.btn.active{background:#2563eb;border-color:#60a5fa}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;max-height:500px;overflow-y:auto;padding-right:4px}
+.card{position:relative;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#08111f;overflow:hidden}
+.thumb{width:100%;height:140px;background-size:cover;background-position:center;background-color:#0f1a2e;cursor:pointer}
+.info{padding:6px 8px}
+.num{font-size:14px;font-weight:700;color:#e5edf7}
+.idt{font-size:9px;color:#64748b;word-break:break-all;margin-top:1px}
+.tagline{font-size:11px;color:#7dd3c7;margin-top:4px;word-break:break-all}
+.empty{text-align:center;color:#93a4bc;padding:34px 16px;font-size:14px}
+.prompt-list{max-height:250px;overflow:auto}
+.prompt-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid rgba(148,163,184,.1);font-size:12px}
+.prompt-item.done{color:#64748b;text-decoration:line-through}
+.prompt-item .idx{width:54px;color:#64748b}
+.prompt-item .pid{flex:1;word-break:break-all;font-family:Consolas,monospace;font-size:11px}
+.prompt-item .state{font-size:11px;color:#facc15}
+.prompt-item .state.done{color:#64748b}
+.toast{position:fixed;right:16px;bottom:16px;z-index:99;border-radius:6px;padding:8px 14px;color:#fff;font-size:12px;background:#0f9f8f;box-shadow:0 4px 14px rgba(0,0,0,.18);opacity:0;transition:opacity .2s;pointer-events:none}
+.progress{height:4px;background:#1f2937;border-radius:2px;margin-top:4px;overflow:hidden}
+.progress div{height:100%;background:#0f9f8f;border-radius:2px;transition:width .3s}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:6px;background:rgba(148,163,184,.16);color:#cbd5e1}
+.badge.ok{background:rgba(15,159,143,.2);color:#7dd3c7}
+.badge.warn{background:rgba(245,158,11,.16);color:#facc15}
+.stats{font-size:12px;color:#93a4bc;margin-left:auto}
+.shortcut-list{display:grid;gap:8px;margin-top:8px}
+.shortcut-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(148,163,184,.18);border-radius:6px;background:#08111f}
+.shortcut-item .label-name{font-weight:700;min-width:80px}
+.shortcut-item .label-meta{color:#93a4bc;font-size:11px;flex:1}
+.keycap{min-width:42px;text-align:center;border:1px solid rgba(148,163,184,.35);border-radius:5px;padding:4px 8px;background:#172033;color:#e5edf7;font-weight:700}
+.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;display:none;align-items:center;justify-content:center;padding:20px}
+.modal{width:min(460px,100%);background:#111827;border:1px solid rgba(148,163,184,.28);border-radius:8px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.modal h3{font-size:16px;margin-bottom:12px}
+.capture{border-color:#14b8a6!important;background:#0f766e!important}
+.prelabel-layout{display:grid;grid-template-columns:minmax(260px,360px) 1fr;gap:14px}
+.prelabel-image{height:260px;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#08111f center/contain no-repeat}
+.prelabel-meta{font-size:12px;color:#93a4bc;margin-top:8px;word-break:break-all}
+.label-group{margin-bottom:12px}
+.label-group-title{font-size:12px;color:#93a4bc;margin-bottom:6px}
+.label-buttons{display:flex;gap:8px;flex-wrap:wrap}
+.select-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.prelabel-image.zoomed{height:min(72vh,680px);position:relative;z-index:5;background-color:#020617;border-color:#14b8a6}
+.slot-layout{display:grid;grid-template-columns:1fr;gap:12px}
+.slot-panel{border:1px solid rgba(148,163,184,.22);border-radius:8px;background:#08111f;padding:10px}
+.slot-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.slot-head h3{font-size:13px;color:#e5edf7;margin-right:4px}
+.slot-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.mini-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:8px;min-height:80px;max-height:360px;overflow-y:auto;padding-right:4px}
+.mini-card{border:1px solid rgba(148,163,184,.22);border-radius:8px;background:#0f1a2e;overflow:hidden;cursor:pointer;position:relative}
+.mini-card.selected{border-color:#14b8a6;box-shadow:0 0 0 2px rgba(20,184,166,.28)}
+.mini-thumb{height:86px;background:#020617 center/cover no-repeat}
+.mini-info{padding:5px 6px;font-size:11px;color:#cbd5e1}
+.mini-label{font-size:10px;color:#7dd3c7;word-break:break-all;margin-top:2px}
+.slot-label-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,.14)}
+.slot-hint{font-size:11px;color:#93a4bc}
+.slot-switch{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:6px}
+.slot-switch .btn{padding:6px 12px}
+@media (max-width:760px){.prelabel-layout{grid-template-columns:1fr}.prelabel-image{height:220px}}
+</style>
+</head>
+<body>
+
+<h1>AMiner Image Prefetch <button class="btn" onclick="pinWindow()" style="margin-left:8px;font-size:11px">置顶</button></h1>
+
+<div class="panel" id="configPanel">
+  <h2>配置</h2>
+  <div class="row">
+    <label>Token</label>
+    <input id="cfgToken" placeholder="粘贴 Access-Token">
+  </div>
+  <div class="row">
+    <label>Task</label>
+    <input id="cfgTask" placeholder="181903" style="max-width:100px">
+    <label>Start</label>
+    <input id="cfgDate" placeholder="1781744400" style="max-width:140px">
+    <label>Cache</label>
+    <input id="cfgCacheSize" type="number" min="1" step="1" placeholder="200" style="max-width:90px">
+    <button class="btn primary" onclick="saveConfig(event)">保存</button>
+    <button class="btn" onclick="loadPrompts()">加载题目</button>
+    <span id="promptStats"></span>
+  </div>
+</div>
+
+<div class="panel" id="labelConfigPanel">
+  <h2>快捷键标签</h2>
+  <div class="row">
+    <button class="btn primary" onclick="openShortcutModal()">新建快捷键</button>
+    <button class="btn" onclick="loadLabelsConfig()">刷新</button>
+  </div>
+  <div class="shortcut-list" id="shortcutList"></div>
+</div>
+
+<div class="panel" id="prelabelPanel">
+  <h2>预标注窗口 <span id="layerStats" class="stats"></span></h2>
+  <div class="row">
+    <span class="badge" id="monitorBadge">当前题号: -</span>
+    <button class="btn" onclick="followCurrentQuestion()">跟随当前题</button>
+    <button class="btn" onclick="loadPreviousLabeled()">返回上一张已标注</button>
+    <select id="labeledImageSelect" style="min-width:220px"></select>
+    <button class="btn" onclick="loadSelectedLabeled()">选择已标注图片</button>
+    <button class="btn" onclick="togglePreviewZoom()">放大/缩回预览</button>
+    <button class="btn" id="capturePreviewKeyBtn" onclick="startPreviewKeyCapture()">设置放大键</button>
+    <span class="keycap" id="previewHotkeyLabel">Z</span>
+    <div class="slot-switch">
+      <span class="slot-hint">查看槽位</span>
+      <button class="btn" id="previewSlotUnlabeled" onclick="switchPreviewSlot('unlabeled')">未标注</button>
+      <button class="btn" id="previewSlotPreconfirm" onclick="switchPreviewSlot('preconfirm')">预确定</button>
+      <button class="btn" id="previewSlotCompleted" onclick="switchPreviewSlot('completed')">已完成</button>
+    </div>
+  </div>
+  <div class="prelabel-layout">
+    <div>
+      <div class="prelabel-image" id="prelabelImage"></div>
+      <div class="prelabel-meta" id="prelabelMeta">等待当前题号和缓存图片</div>
+    </div>
+    <div>
+      <div id="prelabelLabels"></div>
+      <div class="select-line">
+        <button class="btn primary" onclick="savePrelabelLabels()">保存标注并进入下一张</button>
+        <button class="btn danger" onclick="clearPrelabelLabels()">清空当前图标签</button>
+      </div>
+      <div class="prelabel-meta" id="prelabelText">当前标注: -</div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="cacheSlotPanel">
+  <h2>图片缓存槽 <span id="slotStats" class="stats"></span></h2>
+  <div class="slot-layout">
+    <div class="slot-panel" id="unlabeledSlot">
+      <div class="slot-head">
+        <h3>未标注缓存槽</h3>
+        <span class="slot-hint">选中上方标签→左键单击图片打标；可按不同颜色给不同图片打不同标签；右键或确认按钮批量进入预确定。</span>
+      </div>
+      <div class="slot-label-row" id="unlabeledSlotLabels"></div>
+      <div class="slot-actions">
+        <button class="btn primary" onclick="confirmSlotSelection('unlabeled')">确认标注所选</button>
+        <button class="btn" onclick="clearSlotSelection('unlabeled')">取消选择</button>
+        <button class="btn" onclick="showLayerInPreview('unlabeled')">预标注窗口查看未标注</button>
+      </div>
+      <div class="mini-grid" id="unlabeledGrid"></div>
+    </div>
+
+    <div class="slot-panel" id="preconfirmSlot">
+      <div class="slot-head">
+        <h3>预确定缓存槽</h3>
+        <span class="slot-hint">可重新选标签覆盖；右键或确认按钮提交所选到已完成。</span>
+      </div>
+      <div class="slot-label-row" id="preconfirmSlotLabels"></div>
+      <div class="slot-actions">
+        <button class="btn primary" onclick="confirmSlotSelection('preconfirm')">提交所选</button>
+        <button class="btn" onclick="submitAllPreconfirm()">全部提交</button>
+        <button class="btn" onclick="clearSlotSelection('preconfirm')">取消选择</button>
+        <button class="btn" onclick="showLayerInPreview('preconfirm')">预标注窗口查看预确定</button>
+      </div>
+      <div class="mini-grid" id="preconfirmGrid"></div>
+    </div>
+
+    <div class="slot-panel" id="completedSlot">
+      <div class="slot-head">
+        <h3>已完成标注缓存槽</h3>
+        <span class="slot-hint">这里显示已经提交到本地完成层的图片，可继续请求网页提交。</span>
+      </div>
+      <div class="slot-actions">
+        <button class="btn primary" onclick="requestCompletedWebSubmit(false)">提交所选到网页</button>
+        <button class="btn" onclick="requestCompletedWebSubmit(true)">全部提交到网页</button>
+        <button class="btn" onclick="clearSlotSelection('completed')">取消选择</button>
+        <button class="btn danger" id="flushQueueBtn" onclick="flushSubmitQueue()" style="display:none">清空队列</button>
+      </div>
+      <div id="queueProgress" style="display:none;margin-bottom:8px;font-size:11px;color:#7dd3c7">
+        提交队列: <span id="queueProgressText">0/0</span>
+        <div class="progress" style="margin-top:3px"><div id="queueProgressBar" style="width:0%;transition:width .3s"></div></div>
+      </div>
+      <div class="mini-grid" id="completedGrid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="shortcutModal">
+  <div class="modal">
+    <h3>新建快捷键</h3>
+    <div class="row">
+      <label>标签</label>
+      <input id="shortcutLabel" placeholder="例如: 惊艳、好看、带水印">
+    </div>
+    <div class="row">
+      <label>分组</label>
+      <input id="shortcutGroup" placeholder="例如: 图片质量" value="图片质量">
+    </div>
+    <div class="row">
+      <label>模式</label>
+      <select id="shortcutMode">
+        <option value="single">单选</option>
+        <option value="multi">多选</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>快捷键</label>
+      <button class="btn" id="captureKeyBtn" onclick="startKeyCapture()">点击后按一个键</button>
+      <span id="capturedKey" class="keycap">未设置</span>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="closeShortcutModal()">取消</button>
+      <button class="btn primary" onclick="saveShortcutFromModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="promptPanel" style="display:none">
+  <h2>当前进度和预取</h2>
+  <div class="row">
+    <label>当前第</label>
+    <input id="curQ" type="number" placeholder="自动检测" style="max-width:80px">
+    <label>题</label>
+    <button class="btn primary" onclick="prefetchNext()">预取10张</button>
+    <div class="progress" style="flex:1;max-width:160px" id="progressBar"><div id="progressFill" style="width:0%"></div></div>
+  </div>
+  <div class="row">
+    <select id="pageSelect" onchange="loadPrompts()" style="max-width:100px"></select>
+    <label>跳转到第</label>
+    <input id="jumpQ" type="number" placeholder="题号" style="max-width:80px" onkeydown="if(event.key==='Enter')jumpToQuestion()">
+    <label>题</label>
+    <button class="btn" onclick="jumpToQuestion()">跳转</button>
+    <span style="font-size:11px;color:#93a4bc">每页20题，共2000题</span>
+  </div>
+  <div class="prompt-list" id="promptList"></div>
+</div>
+
+<div class="panel">
+  <h2>已缓存图片 <span id="cacheStats" class="stats"></span></h2>
+  <div class="row">
+    <button class="btn" onclick="refreshImages({sync:true})">刷新</button>
+    <button class="btn danger" onclick="clearAll()">清空</button>
+    <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <button class="btn" id="gridPrevBtn" onclick="gridPagePrev()">上一页</button>
+      <span id="gridPageInfo" style="font-size:11px;color:#93a4bc">第 1 页</span>
+      <button class="btn" id="gridNextBtn" onclick="gridPageNext()">下一页</button>
+      <select id="gridPageSizeSel" onchange="gridChangePageSize()" style="min-width:60px;padding:4px 6px;font-size:11px">
+        <option value="30">30张/页</option>
+        <option value="60">60张/页</option>
+        <option value="120">120张/页</option>
+      </select>
+    </span>
+  </div>
+  <div class="grid" id="grid"><div class="empty">暂无缓存图片</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var promptData=[],currentPage=1,totalPages=1,labelsConfig=null,capturedShortcutKey='',capturingKey=false,capturingPreviewKey=false;
+var cachedImages=[],activePrelabel=null,prelabelLabels={},manualPrelabel=false,lastMonitorQuestion=0,prelabelDirty=false,previewZoomed=false,activePreviewSlot='unlabeled';
+var gridPage=1,gridPageSize=30,_lastCacheSnapshot='';
+var webSubmitQueue=[],webSubmitRunning=false,webSubmitTotal=0,webSubmitDone=0;
+var SUBMIT_POLL_INTERVAL=2000,SUBMIT_POLL_MAX=30,SUBMIT_STEP_DELAY=500,PRELABEL_STEP_DELAY=50,PRELABEL_BATCH_DELAY=150;
+var MAX_RETRY=5,RETRY_DELAY=3000;
+var previewHotkey=localStorage.getItem('aminerPreviewHotkey')||'Z';
+var LABEL_COLORS={amazing:'#f97316',good:'#22c55e',normal:'#475569',bad:'#dc2626',nice:'#8b5cf6',watermark:'#2563eb',watermark_yes:'#2563eb',default:'#64748b'};
+var slotActiveLabel={unlabeled:null,preconfirm:null};
+var slotImageLabels={unlabeled:{},preconfirm:{}};
+var slotSelections={unlabeled:new Set(),preconfirm:new Set(),completed:new Set()};
+function labelColor(label){var groups=(labelsConfig&&labelsConfig.groups)||[];for(var i=0;i<groups.length;i++){var g=groups[i];for(var j=0;j<(g.options||[]).length;j++){var o=g.options[j];if((o.label||o.id)===label){return LABEL_COLORS[o.id]||LABEL_COLORS[label]||LABEL_COLORS.default}}}return LABEL_COLORS.default}
+function labelColorFromGroupId(groupId,value){var groups=(labelsConfig&&labelsConfig.groups)||[];for(var i=0;i<groups.length;i++){if(groups[i].id===groupId){var opts=groups[i].options||[];for(var j=0;j<opts.length;j++){if(opts[j].label===value||opts[j].id===value)return LABEL_COLORS[opts[j].id]||LABEL_COLORS.default}}};return LABEL_COLORS.default}
+function getImageLabelsForSlot(slot,hash){if(!slotImageLabels[slot][hash])slotImageLabels[slot][hash]={};return slotImageLabels[slot][hash]}
+function getImageLabelTextForSlot(slot,hash){var lbls=getImageLabelsForSlot(slot,hash);return labelTextFrom(lbls)}
+
+function $(s){return document.querySelector(s)}
+function toast(m,c){var t=$('#toast');t.textContent=m;t.style.background=c||'#0f9f8f';t.style.opacity=1;clearTimeout(toast.tm);toast.tm=setTimeout(function(){t.style.opacity=0},2000)}
+async function api(path,opt){var r=await fetch(path,opt||{});if(!r.ok)throw new Error(await r.text());return r.json()}
+function editableTarget(target){
+  if(!target)return false;
+  var tag=String(target.tagName||'').toLowerCase();
+  return tag==='input'||tag==='textarea'||tag==='select'||target.isContentEditable;
+}
+
+function cloneLabels(labels){
+  var next={};
+  Object.keys(labels||{}).forEach(function(k){
+    if(Array.isArray(labels[k])&&labels[k].length)next[k]=labels[k].slice();
+  });
+  return next;
+}
+
+function isLabeled(img){return !!(img&&(img.labelText||img.labelStatus==='labeled'||img.labelStatus==='submitted'))}
+function isUnlabeled(img){return !!(img&&!img.labelText&&img.labelStatus!=='labeled'&&img.labelStatus!=='submitted')}
+function isPreconfirm(img){return !!(img&&img.labelText&&img.labelStatus==='labeled')}
+function isCompleted(img){return !!(img&&['submitted','submit_requested','cloud_submitted','submit_failed'].indexOf(img.labelStatus)>=0)}
+function imageTitle(img){return img&&img.questionNum>0?'第 '+img.questionNum+' 题':'未编号'}
+function labelTextFrom(labels){
+  var parts=[];
+  ((labelsConfig&&labelsConfig.groups)||[]).forEach(function(group){
+    (labels[group.id]||[]).forEach(function(v){parts.push(v)});
+  });
+  Object.keys(labels||{}).forEach(function(k){
+    if(((labelsConfig&&labelsConfig.groups)||[]).some(function(g){return g.id===k}))return;
+    (labels[k]||[]).forEach(function(v){parts.push(v)});
+  });
+  return parts.join('_');
+}
+
+async function loadLabelsConfig(){
+  try{
+    labelsConfig=await api('/api/labels-config');
+    renderShortcutList();
+    renderPrelabel();
+    renderCacheSlots();
+  }catch(e){toast('加载快捷键失败: '+e.message,'#d94848')}
+}
+
+async function saveLabelsConfig(){
+  try{
+    await api('/api/labels-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(labelsConfig)});
+    renderShortcutList();
+    renderPrelabel();
+    renderCacheSlots();
+    toast('快捷键已保存');
+  }catch(e){toast('保存快捷键失败: '+e.message,'#d94848')}
+}
+
+function renderShortcutList(){
+  var list=$('#shortcutList');list.innerHTML='';
+  var groups=(labelsConfig&&labelsConfig.groups)||[];
+  if(!groups.length){list.innerHTML='<div class="empty" style="padding:18px">暂无快捷键</div>';return}
+  groups.forEach(function(group){
+    (group.options||[]).forEach(function(opt){
+      var item=document.createElement('div');item.className='shortcut-item';
+      item.innerHTML='<span class="keycap">'+(opt.hotkey||'-')+'</span><span class="label-name"></span><span class="label-meta"></span><button class="btn danger">删除</button>';
+      item.querySelector('.label-name').textContent=opt.label;
+      item.querySelector('.label-meta').textContent=group.name+' / '+(group.mode==='multi'?'多选':'单选');
+      item.querySelector('button').onclick=function(){deleteShortcut(group.id,opt.id)};
+      list.appendChild(item);
+    });
+  });
+}
+
+function openShortcutModal(){
+  if(!labelsConfig)labelsConfig={groups:[],submit:{enabled:false,batchSize:5,strategy:'keyboard'}};
+  $('#shortcutLabel').value='';
+  $('#shortcutGroup').value='图片质量';
+  $('#shortcutMode').value='single';
+  capturedShortcutKey='';
+  $('#capturedKey').textContent='未设置';
+  $('#captureKeyBtn').textContent='点击后按一个键';
+  $('#captureKeyBtn').classList.remove('capture');
+  $('#shortcutModal').style.display='flex';
+  setTimeout(function(){$('#shortcutLabel').focus()},50);
+}
+
+function closeShortcutModal(){capturingKey=false;$('#shortcutModal').style.display='none'}
+function startKeyCapture(){capturingKey=true;$('#captureKeyBtn').classList.add('capture');$('#captureKeyBtn').textContent='请按下快捷键'}
+
+window.addEventListener('keydown',function(e){
+  if(!capturingKey)return;
+  e.preventDefault();e.stopPropagation();
+  var key=normalizeShortcutKey(e);
+  if(!key)return;
+  capturedShortcutKey=key;
+  capturingKey=false;
+  $('#capturedKey').textContent=key;
+  $('#captureKeyBtn').textContent='重新设置';
+  $('#captureKeyBtn').classList.remove('capture');
+},true);
+
+function startPreviewKeyCapture(){
+  capturingPreviewKey=true;
+  $('#capturePreviewKeyBtn').classList.add('capture');
+  $('#capturePreviewKeyBtn').textContent='请按下放大键';
+}
+
+function finishPreviewKeyCapture(key){
+  previewHotkey=key;
+  localStorage.setItem('aminerPreviewHotkey',key);
+  capturingPreviewKey=false;
+  $('#previewHotkeyLabel').textContent=key;
+  $('#capturePreviewKeyBtn').textContent='设置放大键';
+  $('#capturePreviewKeyBtn').classList.remove('capture');
+}
+
+function togglePreviewZoom(){
+  previewZoomed=!previewZoomed;
+  $('#prelabelImage').classList.toggle('zoomed',previewZoomed);
+}
+
+window.addEventListener('keydown',function(e){
+  if(capturingPreviewKey){
+    e.preventDefault();e.stopPropagation();
+    var nextKey=normalizeShortcutKey(e);
+    if(nextKey)finishPreviewKeyCapture(nextKey);
+    return;
+  }
+  if(capturingKey||$('#shortcutModal').style.display==='flex')return;
+  var key=normalizeShortcutKey(e);
+  if(!key)return;
+
+  // === Enter-based shortcuts ===
+  if(key==='ENTER'){
+    // Ctrl+Shift+Alt+Enter → 提交预确定槽全部到已完成
+    if(e.ctrlKey&&e.shiftKey&&e.altKey){
+      e.preventDefault();
+      submitAllPreconfirm();
+      return;
+    }
+    // Ctrl+Shift+Enter → 保存当前标注到预缓存槽
+    if(e.ctrlKey&&e.shiftKey){
+      e.preventDefault();
+      if(activePrelabel)savePrelabelLabels();
+      return;
+    }
+    // Alt+Enter → 提交已完成到网页
+    if(e.altKey){
+      e.preventDefault();
+      requestCompletedWebSubmit(true);
+      return;
+    }
+    // Plain Enter → 保存标注 (原有行为)
+    if(activePrelabel&&!e.ctrlKey&&!e.altKey&&!e.metaKey){
+      savePrelabelLabels();
+      e.preventDefault();
+      return;
+    }
+    return;  // 其他 Enter 组合键忽略
+  }
+
+  // 阻止其他带修饰键的快捷键
+  if(e.ctrlKey||e.altKey||e.metaKey)return;
+  if(editableTarget(e.target))return;
+
+  if(key===previewHotkey){
+    togglePreviewZoom();
+    e.preventDefault();
+    return;
+  }
+  var entry=findPrelabelHotkey(key);
+  if(entry){
+    togglePrelabelLabel(entry.group,entry.option);
+    e.preventDefault();
+    return;
+  }
+},true);
+
+function normalizeShortcutKey(e){
+  var key=String(e.key||'').toUpperCase();
+  if(key===' '||key==='SPACEBAR')return 'SPACE';
+  if(key.length===1)return key;
+  if(/^F\d{1,2}$/.test(key))return key;
+  if(['ENTER','TAB','BACKSPACE','DELETE','ARROWUP','ARROWDOWN','ARROWLEFT','ARROWRIGHT'].indexOf(key)>=0)return key;
+  return '';
+}
+
+function findPrelabelHotkey(key){
+  key=String(key||'').toUpperCase();
+  var groups=(labelsConfig&&labelsConfig.groups)||[];
+  for(var i=0;i<groups.length;i++){
+    var group=groups[i],options=group.options||[];
+    for(var j=0;j<options.length;j++){
+      if(String(options[j].hotkey||'').toUpperCase()===key)return {group:group,option:options[j]};
+    }
+  }
+  return null;
+}
+
+function setActiveSlotLabel(slot,group,opt){
+  if(slotActiveLabel[slot]&&slotActiveLabel[slot].groupId===group.id&&slotActiveLabel[slot].optionId===opt.id){
+    slotActiveLabel[slot]=null;
+  }else{
+    slotActiveLabel[slot]={groupId:group.id,groupName:group.name,groupMode:group.mode,optionId:opt.id,optionLabel:opt.label,color:LABEL_COLORS[opt.id]||LABEL_COLORS.default};
+  }
+  renderCacheSlots();
+}
+
+function renderSlotLabelButtons(slot,containerId){
+  var box=$('#'+containerId);if(!box)return;
+  box.innerHTML='';
+  var groups=(labelsConfig&&labelsConfig.groups)||[];
+  if(!groups.length){box.innerHTML='<span class="slot-hint">暂无标签，请先新建快捷键</span>';return}
+  var active=slotActiveLabel[slot];
+  groups.forEach(function(group){
+    (group.options||[]).forEach(function(opt){
+      var isActive=active&&active.groupId===group.id&&active.optionId===opt.id;
+      var color=LABEL_COLORS[opt.id]||LABEL_COLORS.default;
+      var b=document.createElement('button');b.className='btn';
+      if(isActive){b.style.cssText='background:'+color+';border-color:'+color+';color:#fff;font-weight:700;box-shadow:0 0 8px '+color+'44;'}
+      else{b.style.cssText='border-left:3px solid '+color+';';}
+      b.textContent=opt.label+(opt.hotkey?' ['+opt.hotkey+']':'');
+      b.onclick=function(){setActiveSlotLabel(slot,group,opt)};
+      box.appendChild(b);
+    });
+  });
+}
+
+function toggleSlotImage(slot,img){
+  var active=slotActiveLabel[slot];
+  var set=slotSelections[slot];
+  if(active){
+    var lbls=getImageLabelsForSlot(slot,img.hash);
+    var grpId=active.groupId;
+    var cur=Array.isArray(lbls[grpId])?lbls[grpId].slice():[];
+    if(active.groupMode==='multi'){
+      var ex=cur.indexOf(active.optionLabel)>=0;
+      lbls[grpId]=ex?cur.filter(function(x){return x!==active.optionLabel}):cur.concat(active.optionLabel);
+      if(!lbls[grpId].length)delete lbls[grpId];
+    }else{
+      if(cur.indexOf(active.optionLabel)>=0){lbls[grpId]=[];delete lbls[grpId];}else{lbls[grpId]=[active.optionLabel]}
+    }
+    if(Object.keys(lbls).length>0)set.add(img.hash);
+    else set.delete(img.hash);
+    selectPrelabelImage(img,true);
+  }else{
+    if(set.has(img.hash))set.delete(img.hash);else set.add(img.hash);
+    selectPrelabelImage(img,true);
+  }
+  renderCacheSlots();
+}
+
+function clearSlotSelection(slot){
+  slotSelections[slot].clear();
+  slotImageLabels[slot]={};
+  renderCacheSlots();
+}
+
+function selectedSlotImages(slot){
+  var set=slotSelections[slot];
+  return cachedImages.filter(function(img){return set.has(img.hash)});
+}
+
+function slotImages(slot){
+  if(slot==='preconfirm')return cachedImages.filter(isPreconfirm).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  if(slot==='completed')return cachedImages.filter(isCompleted).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  return cachedImages.filter(isUnlabeled).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+}
+
+function updatePreviewSlotButtons(){
+  [['unlabeled','#previewSlotUnlabeled'],['preconfirm','#previewSlotPreconfirm'],['completed','#previewSlotCompleted']].forEach(function(pair){
+    var btn=$(pair[1]);
+    if(btn)btn.classList.toggle('active',activePreviewSlot===pair[0]);
+  });
+}
+
+function switchPreviewSlot(slot){
+  activePreviewSlot=slot;
+  manualPrelabel=true;
+  var imgs=slotImages(slot);
+  if(imgs.length)selectPrelabelImage(imgs[0],true);
+  else{
+    activePrelabel=null;
+    prelabelLabels={};
+    renderPrelabel();
+    toast(slot==='preconfirm'?'预确定缓存槽暂无图片':slot==='completed'?'已完成标注缓存槽暂无图片':'未标注缓存槽暂无图片','#d94848');
+  }
+  updatePreviewSlotButtons();
+}
+
+async function updateImageStatus(img,status,message){
+  await api('/api/image-label-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    hash:img.hash,promptId:img.promptId,questionNum:img.questionNum,status:status,message:message||''
+  })});
+}
+
+async function applyLabelsToImage(img,labels){
+  await api('/api/image-labels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    hash:img.hash,promptId:img.promptId,questionNum:img.questionNum,labels:cloneLabels(labels)
+  })});
+}
+
+async function confirmSlotSelection(slot){
+  var imgs=selectedSlotImages(slot);
+  if(!imgs.length)return toast('请先选择图片','#d94848');
+  var count=0;
+  if(slot==='unlabeled'){
+    for(var i=0;i<imgs.length;i++){
+      var lbls=cloneLabels(slotImageLabels[slot][imgs[i].hash]||{});
+      if(!labelTextFrom(lbls))continue;
+      await applyLabelsToImage(imgs[i],lbls);
+      delete slotImageLabels[slot][imgs[i].hash];
+      count++;
+      await new Promise(function(r){setTimeout(r,PRELABEL_STEP_DELAY)});
+    }
+    slotSelections.unlabeled.clear();
+    toast('已进入预确定 '+count+' 张');
+    if(count===0)toast('请先给图片选择标签','#d94848');
+  }else if(slot==='preconfirm'){
+    for(var j=0;j<imgs.length;j++){
+      var override=cloneLabels(slotImageLabels[slot][imgs[j].hash]||{});
+      if(Object.keys(override).length)await applyLabelsToImage(imgs[j],override);
+      await updateImageStatus(imgs[j],'submitted','local confirmed');
+      delete slotImageLabels[slot][imgs[j].hash];
+      count++;
+    }
+    slotSelections.preconfirm.clear();
+    toast('已提交到已完成 '+count+' 张');
+  }
+  await refreshImages({sync:false});
+}
+
+async function submitAllPreconfirm(){
+  var imgs=cachedImages.filter(isPreconfirm);
+  if(!imgs.length)return toast('预确定缓存槽暂无图片','#d94848');
+  slotSelections.preconfirm.clear();
+  var count=0;
+  for(var i=0;i<imgs.length;i++){
+    // Save slot labels if assigned (defensive: prevents label loss when user labeled via slot click)
+    var slotLabels=cloneLabels(slotImageLabels.preconfirm[imgs[i].hash]||{});
+    if(Object.keys(slotLabels).length){
+      try{await applyLabelsToImage(imgs[i],slotLabels)}catch(e){}
+      delete slotImageLabels.preconfirm[imgs[i].hash];
+    }
+    await updateImageStatus(imgs[i],'submitted','local batch');
+    count++;
+    if(i%5===0)toast('提交中 '+count+'/'+imgs.length+' ...');
+    await new Promise(function(r){setTimeout(r,PRELABEL_BATCH_DELAY)});
+  }
+  toast('已全部提交 '+count+' 张');
+  await refreshImages({sync:false});
+}
+
+async function requestCompletedWebSubmit(all){
+  var imgs=all?cachedImages.filter(isCompleted):selectedSlotImages('completed');
+  imgs=imgs.filter(function(img){return img.labelText&&img.labelStatus!=='cloud_submitted'});
+  if(!imgs.length)return toast(all?'已完成槽暂无可提交图片':'请先选择已完成图片','#d94848');
+  slotSelections.completed.clear();
+  webSubmitQueue=imgs.map(function(img){return img.hash});
+  webSubmitTotal=webSubmitQueue.length;webSubmitDone=0;
+  $('#queueProgress').style.display='block';$('#flushQueueBtn').style.display='inline-block';
+  $('#queueProgressText').textContent='0/'+webSubmitTotal;
+  $('#queueProgressBar').style.width='0%';
+  if(!webSubmitRunning)processWebSubmitQueue();
+}
+
+async function processWebSubmitQueue(){
+  if(webSubmitRunning)return;
+  webSubmitRunning=true;
+  var idx=0;
+  function updateProgress(){
+    var pct=webSubmitTotal?Math.round(idx/webSubmitTotal*100):0;
+    $('#queueProgressText').textContent=idx+'/'+webSubmitTotal;
+    $('#queueProgressBar').style.width=pct+'%';
+  }
+  function finish(){
+    webSubmitRunning=false;webSubmitQueue=[];webSubmitTotal=0;webSubmitDone=0;
+    $('#queueProgress').style.display='none';$('#flushQueueBtn').style.display='none';
+  }
+  while(idx<webSubmitQueue.length){
+    var hash=webSubmitQueue[idx];
+    try{
+      var img=cachedImages.find(function(x){return x.hash===hash});
+      if(!img){idx++;continue}
+      if(img.labelStatus==='cloud_submitted'){idx++;updateProgress();continue}
+      if(!img.labelText){idx++;updateProgress();continue}
+      // Refresh image data
+      try{var f=await api('/api/images');var fresh=(f||[]).find(function(x){return x.hash===hash});if(fresh){img=fresh}}catch(e){}
+      if(img.labelStatus==='cloud_submitted'){idx++;updateProgress();continue}
+      // Mark as pending — may fail if image was evicted from db
+      try{await updateImageStatus(img,'submit_requested','queue')}catch(e){idx++;continue}
+    }catch(e){}
+    idx++;
+    updateProgress();
+    await new Promise(function(r){setTimeout(r,SUBMIT_STEP_DELAY)});
+  }
+  finish();
+  toast('队列已全部发送，等待网页扩展逐题提交...');
+  await refreshImages({sync:false});
+}
+
+function flushSubmitQueue(){
+  webSubmitQueue=[];webSubmitRunning=false;webSubmitTotal=0;webSubmitDone=0;
+  $('#queueProgress').style.display='none';$('#flushQueueBtn').style.display='none';
+  toast('提交队列已清空');
+}
+
+function showLayerInPreview(slot){
+  switchPreviewSlot(slot);
+}
+
+function renderMiniGrid(slot,containerId,imgs){
+  var grid=$('#'+containerId);if(!grid)return;
+  var savedScroll=grid.scrollTop;
+  grid.innerHTML='';
+  if(!imgs.length){grid.innerHTML='<div class="empty" style="grid-column:1/-1;padding:20px">暂无图片</div>';return}
+  var activeBrush=slotActiveLabel[slot];
+  imgs.forEach(function(img){
+    var card=document.createElement('div');card.className='mini-card';
+    var isSelected=slotSelections[slot]&&slotSelections[slot].has(img.hash);
+    if(isSelected)card.className+=' selected';
+    // Colored left border based on assigned labels
+    var imgLbls=(slot==='unlabeled'||slot==='preconfirm')?slotImageLabels[slot][img.hash]:null;
+    if(imgLbls&&Object.keys(imgLbls).length){
+      var firstKey=Object.keys(imgLbls)[0];
+      var firstVal=(imgLbls[firstKey]||[''])[0];
+      var borderColor=labelColorFromGroupId(firstKey,firstVal);
+      card.style.borderLeft='3px solid '+borderColor;
+    }
+    var thumb=document.createElement('div');thumb.className='mini-thumb';
+    thumb.style.backgroundImage='url(/api/image/'+img.hash+')';
+    var info=document.createElement('div');info.className='mini-info';
+    var titleDiv=document.createElement('div');titleDiv.textContent=imageTitle(img);
+    info.appendChild(titleDiv);
+    // Show colored label badges
+    if(imgLbls&&Object.keys(imgLbls).length){
+      var badgeRow=document.createElement('div');badgeRow.style.cssText='display:flex;gap:3px;flex-wrap:wrap;margin-top:3px';
+      Object.keys(imgLbls).forEach(function(gid){
+        (imgLbls[gid]||[]).forEach(function(val){
+          var c=labelColorFromGroupId(gid,val);var bdg=document.createElement('span');
+          bdg.style.cssText='display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;line-height:1.4;background:'+c+';color:#fff;max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+          bdg.textContent=val;badgeRow.appendChild(bdg);
+        });
+      });
+      info.appendChild(badgeRow);
+    }
+    card.appendChild(thumb);card.appendChild(info);
+    card.onclick=function(){toggleSlotImage(slot,img)};
+    card.oncontextmenu=function(e){e.preventDefault();if(slot==='completed')requestCompletedWebSubmit(false);else{toggleSlotImage(slot,img);confirmSlotSelection(slot)}};
+    grid.appendChild(card);
+  });
+  try{grid.scrollTop=savedScroll}catch(e){}
+}
+
+function renderCacheSlots(){
+  if(!document.getElementById('cacheSlotPanel'))return;
+  renderSlotLabelButtons('unlabeled','unlabeledSlotLabels');
+  renderSlotLabelButtons('preconfirm','preconfirmSlotLabels');
+  var unlabeled=cachedImages.filter(isUnlabeled).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  var preconfirm=cachedImages.filter(isPreconfirm).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  var completed=cachedImages.filter(isCompleted).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  $('#slotStats').textContent='未标注 '+unlabeled.length+' / 预确定 '+preconfirm.length+' / 已完成 '+completed.length;
+  renderMiniGrid('unlabeled','unlabeledGrid',unlabeled);
+  renderMiniGrid('preconfirm','preconfirmGrid',preconfirm);
+  renderMiniGrid('completed','completedGrid',completed);
+}
+
+function groupIdFromName(name){return String(name||'group').trim().toLowerCase().replace(/\s+/g,'-')||'group'}
+
+async function saveShortcutFromModal(){
+  var label=$('#shortcutLabel').value.trim();
+  var groupName=$('#shortcutGroup').value.trim()||'默认分组';
+  var mode=$('#shortcutMode').value||'single';
+  if(!label)return toast('请填写标签名称','#d94848');
+  if(!capturedShortcutKey)return toast('请先设置快捷键','#d94848');
+  labelsConfig=labelsConfig||{groups:[],submit:{enabled:false,batchSize:5,strategy:'keyboard'}};
+  labelsConfig.groups=labelsConfig.groups||[];
+  var group=labelsConfig.groups.find(function(g){return g.name===groupName});
+  if(!group){
+    group={id:groupIdFromName(groupName),name:groupName,mode:mode,required:false,options:[]};
+    labelsConfig.groups.push(group);
+  }
+  group.mode=mode;
+  group.options=group.options||[];
+  group.options.push({id:label.toLowerCase().replace(/\s+/g,'-')+'-'+Date.now(),label:label,hotkey:capturedShortcutKey,aliases:[label]});
+  closeShortcutModal();
+  await saveLabelsConfig();
+}
+
+async function deleteShortcut(groupId,optId){
+  if(!labelsConfig)return;
+  labelsConfig.groups=(labelsConfig.groups||[]).map(function(group){
+    if(group.id===groupId)group.options=(group.options||[]).filter(function(opt){return opt.id!==optId});
+    return group;
+  }).filter(function(group){return (group.options||[]).length});
+  await saveLabelsConfig();
+}
+
+async function saveConfig(event){
+  var btn=event&&event.target;
+  if(btn&&btn.tagName==='BUTTON')btn.disabled=true;
+  var token=$('#cfgToken').value.trim(),task=$('#cfgTask').value.trim(),date=$('#cfgDate').value.trim();
+  var cacheSize=parseInt($('#cfgCacheSize').value,10)||200;
+  try{
+    await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token,taskId:task,startDate:date,cacheSize:cacheSize})});
+    toast('已保存');
+    setTimeout(function(){loadPrompts()},300);
+  }catch(e){toast('保存失败: '+e.message,'#d94848')}
+  finally{if(btn)btn.disabled=false}
+}
+
+async function loadPrompts(){
+  try{
+    currentPage=parseInt($('#pageSelect').value)||1;
+    var data=await api('/api/prompts?page='+currentPage);
+    promptData=data.prompts||[];totalPages=data.total_page||1;
+    var sel=$('#pageSelect');sel.innerHTML='';
+    for(var i=1;i<=totalPages;i++){var o=document.createElement('option');o.value=i;o.textContent='第 '+i+' 页';if(i===currentPage)o.selected=true;sel.appendChild(o)}
+    var list=$('#promptList'),doneC=0;list.innerHTML='';
+    var baseQ=(currentPage-1)*20;
+    promptData.forEach(function(p,i){
+      var qn=baseQ+i+1;
+      var d=document.createElement('div');d.className='prompt-item'+(p.state==1?' done':'');
+      d.innerHTML='<span class="idx">第 '+qn+' 题</span><span class="pid"></span><span class="state'+(p.state==1?' done':'')+'">'+(p.state==1?'完成':'待标')+'</span>';
+      d.querySelector('.pid').textContent=p.prompt_id;
+      list.appendChild(d);if(p.state==1)doneC++;
+    });
+    $('#promptStats').innerHTML='<span class="badge '+(doneC===promptData.length?'ok':'warn')+'">'+doneC+'/'+promptData.length+'</span>';
+    $('#promptPanel').style.display='block';
+    for(var j=0;j<promptData.length;j++){if(promptData[j].state!=1){$('#curQ').value=baseQ+j+1;break}}
+  }catch(e){toast('加载失败: '+e.message,'#d94848')}
+}
+
+function jumpToQuestion(){
+  var qn=parseInt($('#jumpQ').value)||0;
+  if(qn<1||qn>2000)return toast('题号范围 1-2000');
+  var page=Math.ceil(qn/20);
+  $('#pageSelect').value=page;
+  $('#curQ').value=qn;
+  loadPrompts();
+}
+
+async function prefetchNext(){
+  if(!promptData.length)return toast('请先加载题目列表');
+  var curQ=parseInt($('#curQ').value)||0;
+  var ids=promptData.filter(function(p){return p.state!=1});
+  if(!ids.length)return toast('当前页无待标注题目');
+  var baseQ=(currentPage-1)*20;
+  var start=0;
+  if(curQ>0)start=Math.max(0,curQ-baseQ-1);
+  ids=ids.slice(start,start+10);
+  if(!ids.length)return toast('当前题之后无待标注题目');
+  var bar=$('#progressFill');bar.style.width='0%';var done=0;
+  for(var i=0;i<ids.length;i++){
+    var p=ids[i];
+    try{
+      var q=await api('/api/question?id='+encodeURIComponent(p.prompt_id));
+      var m=JSON.stringify(q).match(/https:\/\/mm-group-image\.oss-cn-beijing\.aliyuncs\.com\/[^\s"'<>\\]+/g);
+      if(m&&m[0]){
+        var url=m[0].replace(/[)\].,;]+$/g,'');
+        var qn=baseQ+promptData.indexOf(p)+1;
+        await api('/api/cache',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,promptId:p.prompt_id,questionNum:qn})});
+      }
+    }catch(e){}
+    done++;bar.style.width=Math.round(done/ids.length*100)+'%';
+  }
+  toast('完成 '+done+'/'+ids.length+' 张');
+  await refreshImages({sync:true});
+  fetch('/api/monitor-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:currentPage,question:parseInt($('#curQ').value)||0})});
+}
+
+function renderPrelabelSelectors(){
+  var labeled=cachedImages.filter(isLabeled).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  var unlabeled=cachedImages.filter(function(img){return !isLabeled(img)});
+  var preconfirm=cachedImages.filter(isPreconfirm);
+  var completed=cachedImages.filter(isCompleted);
+  $('#layerStats').textContent='未标注 '+unlabeled.length+' / 预确定 '+preconfirm.length+' / 已完成 '+completed.length;
+  updatePreviewSlotButtons();
+  var sel=$('#labeledImageSelect');var keep=sel.value;sel.innerHTML='';
+  if(!labeled.length){var empty=document.createElement('option');empty.value='';empty.textContent='暂无已标注图片';sel.appendChild(empty);return}
+  labeled.forEach(function(img){
+    var o=document.createElement('option');o.value=img.hash;
+    o.textContent=imageTitle(img)+' - '+(img.labelText||'已标注');
+    if(img.hash===keep)o.selected=true;
+    sel.appendChild(o);
+  });
+}
+
+function selectPrelabelImage(img, manual){
+  activePrelabel=img||null;
+  manualPrelabel=!!manual;
+  prelabelLabels=cloneLabels(activePrelabel&&activePrelabel.labels);
+  prelabelDirty=false;
+  renderPrelabel();
+}
+
+function findImageByQuestion(questionNum){
+  return cachedImages.find(function(img){return Number(img.questionNum||0)===Number(questionNum)});
+}
+
+function syncPrelabelToQuestion(questionNum){
+  if(!questionNum)return;
+  var img=findImageByQuestion(questionNum);
+  if(img&&(!activePrelabel||activePrelabel.hash!==img.hash)&&!prelabelDirty)selectPrelabelImage(img,false);
+  else if(!activePrelabel){renderPrelabel()}
+}
+
+async function pollMonitorState(){
+  try{
+    var state=await api('/api/monitor-state');
+    lastMonitorQuestion=Number(state.question||0);
+    $('#monitorBadge').textContent='当前题号: '+(lastMonitorQuestion||'-');
+    if(lastMonitorQuestion)$('#curQ').value=lastMonitorQuestion;
+    if(!manualPrelabel)syncPrelabelToQuestion(lastMonitorQuestion);
+  }catch(e){}
+}
+
+function followCurrentQuestion(){
+  manualPrelabel=false;
+  syncPrelabelToQuestion(lastMonitorQuestion||parseInt($('#curQ').value)||0);
+  toast('已切回跟随当前题');
+}
+
+function togglePrelabelLabel(group,opt){
+  if(!activePrelabel)return toast('预标注窗口暂无图片','#d94848');
+  var current=Array.isArray(prelabelLabels[group.id])?prelabelLabels[group.id].slice():[];
+  if(group.mode==='multi'){
+    var exists=current.indexOf(opt.label)>=0;
+    prelabelLabels[group.id]=exists?current.filter(function(x){return x!==opt.label}):current.concat(opt.label);
+    if(!prelabelLabels[group.id].length)delete prelabelLabels[group.id];
+  }else{
+    prelabelLabels[group.id]=[opt.label];
+  }
+  prelabelDirty=true;
+  renderPrelabel();
+}
+
+function renderPrelabel(){
+  var image=$('#prelabelImage'),meta=$('#prelabelMeta'),box=$('#prelabelLabels'),text=$('#prelabelText');
+  renderPrelabelSelectors();
+  box.innerHTML='';
+  if(activePrelabel){
+    image.style.backgroundImage='url(/api/image/'+activePrelabel.hash+')';
+    meta.textContent=imageTitle(activePrelabel)+' | '+(activePrelabel.promptId||'').slice(0,24)+' | '+(manualPrelabel?'手动回看':'跟随当前题');
+  }else{
+    image.style.backgroundImage='';
+    meta.textContent=lastMonitorQuestion?'当前题号 '+lastMonitorQuestion+' 暂无本地缓存图片':'等待当前题号和缓存图片';
+  }
+  var groups=(labelsConfig&&labelsConfig.groups)||[];
+  if(!groups.length){box.innerHTML='<div class="empty">暂无快捷键标签，请先新建快捷键</div>'}
+  groups.forEach(function(group){
+    var wrap=document.createElement('div');wrap.className='label-group';
+    var title=document.createElement('div');title.className='label-group-title';
+    title.textContent=group.name+' / '+(group.mode==='multi'?'可多选':'单选');
+    var buttons=document.createElement('div');buttons.className='label-buttons';
+    (group.options||[]).forEach(function(opt){
+      var b=document.createElement('button');b.className='btn';
+      if((prelabelLabels[group.id]||[]).indexOf(opt.label)>=0)b.className+=' active';
+      b.textContent=opt.label+(opt.hotkey?' ['+opt.hotkey+']':'');
+      b.onclick=function(){togglePrelabelLabel(group,opt)};
+      buttons.appendChild(b);
+    });
+    wrap.appendChild(title);wrap.appendChild(buttons);box.appendChild(wrap);
+  });
+  text.textContent='当前标注: '+(labelTextFrom(prelabelLabels)||'-');
+}
+
+async function savePrelabelLabels(){
+  if(!activePrelabel)return toast('预标注窗口暂无图片','#d94848');
+  var body={hash:activePrelabel.hash,promptId:activePrelabel.promptId,questionNum:activePrelabel.questionNum,labels:cloneLabels(prelabelLabels)};
+  await api('/api/image-labels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  prelabelDirty=false;
+  toast('已保存 '+imageTitle(activePrelabel)+'：'+(labelTextFrom(prelabelLabels)||'已清空'));
+  var q=Number(activePrelabel.questionNum||0);
+  await refreshImages({sync:false});
+  var next=cachedImages.filter(function(img){return !isLabeled(img)&&Number(img.questionNum||0)>q}).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)})[0];
+  if(!next)next=cachedImages.filter(function(img){return !isLabeled(img)}).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)})[0];
+  activePreviewSlot='unlabeled';
+  if(next)selectPrelabelImage(next,true);
+  else renderPrelabel();
+}
+
+async function clearPrelabelLabels(){
+  if(!activePrelabel)return toast('预标注窗口暂无图片','#d94848');
+  prelabelLabels={};
+  await savePrelabelLabels();
+}
+
+function loadPreviousLabeled(){
+  var labeled=cachedImages.filter(isLabeled).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  if(!labeled.length)return toast('暂无已标注图片','#d94848');
+  var q=activePrelabel?Number(activePrelabel.questionNum||0):Number(lastMonitorQuestion||0);
+  var prev=null;
+  labeled.forEach(function(img){if(!q||Number(img.questionNum||0)<q)prev=img});
+  selectPrelabelImage(prev||labeled[labeled.length-1],true);
+}
+
+function loadSelectedLabeled(){
+  var hash=$('#labeledImageSelect').value;
+  var img=cachedImages.find(function(x){return x.hash===hash});
+  if(!img)return toast('请选择已标注图片','#d94848');
+  selectPrelabelImage(img,true);
+}
+
+function gridPagePrev(){if(gridPage>1){gridPage--;refreshImages({})}}
+function gridPageNext(){var total=Math.ceil(cachedImages.length/gridPageSize)||1;if(gridPage<total){gridPage++;refreshImages({})}}
+function gridChangePageSize(){gridPageSize=parseInt($('#gridPageSizeSel').value)||30;gridPage=1;refreshImages({})}
+
+async function refreshImages(opts){
+  opts=opts||{};
+  var images=await api('/api/images');
+  // 数据无变化时跳过 DOM 重建，但 status/labels 变化必须更新（槽位依赖这些字段）
+  var snapshot=JSON.stringify((images||[]).map(function(i){return i.hash+'|'+i.labelStatus+'|'+i.labelText}));
+  if(!opts.sync&&snapshot===_lastCacheSnapshot)return;
+  _lastCacheSnapshot=snapshot;
+  cachedImages=(images||[]).sort(function(a,b){return (a.questionNum||0)-(b.questionNum||0)});
+  var totalPages=Math.ceil(cachedImages.length/gridPageSize)||1;
+  if(gridPage>totalPages)gridPage=totalPages;
+  var start=(gridPage-1)*gridPageSize;
+  var page=cachedImages.slice(start,start+gridPageSize);
+  var g=$('#grid');
+  var scrollTop=g.scrollTop;
+  g.innerHTML='';
+  var target=parseInt($('#cfgCacheSize').value,10)||200;
+  $('#cacheStats').textContent=cachedImages.length+' 张 / 目标 '+target+'  (第 '+gridPage+'/'+totalPages+' 页)';
+  if(!cachedImages.length){g.innerHTML='<div class="empty" style="grid-column:1/-1">暂无缓存图片</div>'}
+  page.forEach(function(img){
+    var card=document.createElement('div');card.className='card';
+    var thumb=document.createElement('div');thumb.className='thumb';
+    thumb.style.backgroundImage='url(/api/image/'+img.hash+')';
+    thumb.onclick=function(){selectPrelabelImage(img,true)};
+    card.appendChild(thumb);
+    var info=document.createElement('div');info.className='info';
+    var num=document.createElement('div');num.className='num';num.textContent=imageTitle(img);info.appendChild(num);
+    var idt=document.createElement('div');idt.className='idt';idt.textContent=(img.promptId||'').slice(0,18);info.appendChild(idt);
+    var tag=document.createElement('div');tag.className='tagline';tag.textContent=img.labelText||'未标注';info.appendChild(tag);
+    card.appendChild(info);g.appendChild(card);
+  });
+  try{g.scrollTop=scrollTop}catch(e){}
+  if(activePrelabel){
+    var same=cachedImages.find(function(img){return img.hash===activePrelabel.hash});
+    if(same){activePrelabel=same;if(!prelabelDirty)prelabelLabels=cloneLabels(same.labels)}
+  }
+  renderPrelabelSelectors();
+  if(opts.sync)syncPrelabelToQuestion(lastMonitorQuestion||parseInt($('#curQ').value)||0);
+  renderCacheSlots();
+  renderPrelabel();
+}
+
+async function clearAll(){if(!confirm('确定清空?'))return;await api('/api/images',{method:'DELETE'});activePrelabel=null;prelabelLabels={};await refreshImages({sync:true});toast('已清空')}
+async function pinWindow(){await fetch('/api/pin');toast('已置顶')}
+
+(async function(){
+  try{
+    var c=await api('/api/config');
+    if(c.token)$('#cfgToken').value=c.token;
+    if(c.taskId)$('#cfgTask').value=c.taskId;
+    if(c.startDate)$('#cfgDate').value=c.startDate;
+    $('#cfgCacheSize').value=c.cacheSize||200;
+    if(c.token&&c.taskId)loadPrompts();
+  }catch(e){}
+  $('#previewHotkeyLabel').textContent=previewHotkey;
+  await loadLabelsConfig();
+  await refreshImages({sync:true});
+  await pollMonitorState();
+  setInterval(function(){refreshImages({sync:false})},2000);
+  setInterval(pollMonitorState,1000);
+})();
+</script>
+</body>
+</html>
