@@ -322,7 +322,7 @@ func main() {
 			os.WriteFile(cfgPath, b, 0644)
 			st.SaveConfig(b)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(config)
 	})
 
@@ -341,7 +341,11 @@ func main() {
 		if err != nil || len(body) == 0 {
 			body = defaultLabelsConfig
 		}
-		w.Header().Set("Content-Type", "application/json")
+		// Strip UTF-8 BOM if present
+		if len(body) >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF {
+			body = body[3:]
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(body)
 	})
 
@@ -627,7 +631,13 @@ func main() {
 	})
 
 	uiSub, _ := fs.Sub(uiFS, "ui")
-	mux.Handle("/", http.FileServer(http.FS(uiSub)))
+	uiHandler := http.FileServer(http.FS(uiSub))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".html") || r.URL.Path == "/" || !strings.Contains(r.URL.Path, ".") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		}
+		uiHandler.ServeHTTP(w, r)
+	}))
 
 	port := "9800"
 	go openBrowser("http://127.0.0.1:" + port)
