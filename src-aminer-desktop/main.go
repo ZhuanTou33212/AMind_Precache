@@ -761,9 +761,9 @@ func findAssignmentID(taskID, startDate, promptID string, questionNum int) int {
 }
 
 // labelValue maps user-facing label text to submission payload numeric values
-var labelValue = map[string]int{
+var labelValue = map[string]float64{
 	"惊艳":   1,
-	"好看":   3,  // 推测值，建议手动提交一次确认
+	"好看":   0.5,
 	"还不错":  2,
 	"一般":   0,
 	"不堪":   -1,
@@ -771,8 +771,8 @@ var labelValue = map[string]int{
 	"带水印":  1,
 }
 
-func mapLabelsToPayload(labels map[string][]string) map[string]int {
-	payload := map[string]int{"level": 0, "watermark": 0}
+func mapLabelsToPayload(labels map[string][]string) map[string]float64 {
+	payload := map[string]float64{"level": 0, "watermark": 0}
 	for groupID, values := range labels {
 		for _, v := range values {
 			num, ok := labelValue[v]
