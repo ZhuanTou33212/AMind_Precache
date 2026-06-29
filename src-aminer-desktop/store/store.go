@@ -161,6 +161,18 @@ func (s *Store) CacheImage(url, promptID string, questionNum int, reason string)
 	return &ImageRecord{Hash: hash, URL: url, PromptID: promptID, QuestionNum: questionNum, Reason: reason, CachedAt: time.Now().UnixMilli(), FileSize: written, Labels: map[string][]string{}, LabelStatus: "pending"}, nil
 }
 
+func (s *Store) GetByHash(hash string) (*ImageRecord, error) {
+	row := s.db.QueryRow(`SELECT hash,url,prompt_id,question_num,reason,cached_at,file_size,labels,label_status,label_message,submitted_at FROM images WHERE hash=?`, hash)
+	var r ImageRecord
+	var labelsText string
+	err := row.Scan(&r.Hash, &r.URL, &r.PromptID, &r.QuestionNum, &r.Reason, &r.CachedAt, &r.FileSize, &labelsText, &r.LabelStatus, &r.LabelMsg, &r.SubmittedAt)
+	if err != nil {
+		return nil, err
+	}
+	r.Labels, r.LabelText = parseLabels(labelsText)
+	return &r, nil
+}
+
 func (s *Store) ListImages() []ImageRecord {
 	rows, _ := s.db.Query(`SELECT hash,url,prompt_id,question_num,reason,cached_at,file_size,labels,label_status,label_message,submitted_at FROM images ORDER BY question_num ASC`)
 	defer rows.Close()

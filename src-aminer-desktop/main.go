@@ -46,6 +46,7 @@ var config = struct {
 	CacheSize   int    `json:"cacheSize"`
 	PlatformURL string `json:"platformUrl"`
 	OssHost     string `json:"ossHost"`
+	TaggerID    string `json:"taggerId"`
 }{}
 
 var defaultLabelsConfig = []byte(`{
@@ -267,6 +268,7 @@ func main() {
 				CacheSize   *int   `json:"cacheSize"`
 				PlatformURL string `json:"platformUrl"`
 				OssHost     string `json:"ossHost"`
+				TaggerID    string `json:"taggerId"`
 			}
 			body, _ := io.ReadAll(r.Body)
 			json.Unmarshal(body, &incoming)
@@ -291,6 +293,9 @@ func main() {
 			}
 			if incoming.OssHost != "" {
 				config.OssHost = incoming.OssHost
+			}
+			if incoming.TaggerID != "" {
+				config.TaggerID = incoming.TaggerID
 			}
 
 			if strings.HasPrefix(config.Token, "{") {
@@ -474,6 +479,14 @@ func main() {
 			if t, _ := raw["type"].(string); t == "captured-submission-api" {
 				log.Printf("[CAPTURED API] %v %v status=%v body=%v",
 					raw["method"], raw["url"], raw["status"], raw["requestBody"])
+				// Auto-extract tagger_id from first captured submission
+				if rb, ok := raw["requestBody"].(string); ok && config.TaggerID == "" {
+					var sub struct{ TaggerID string `json:"tagger_id"` }
+					if json.Unmarshal([]byte(rb), &sub) == nil && sub.TaggerID != "" {
+						config.TaggerID = sub.TaggerID
+						log.Printf("[SUBMIT] Auto-configured tagger_id=%s", config.TaggerID)
+					}
+				}
 			}
 			if t, _ := raw["type"].(string); t == "captured-prompts-api" {
 				log.Printf("[CAPTURED PROMPTS] %v resp=%v",
@@ -521,6 +534,84 @@ func main() {
 			go pollAnnotations()
 		}
 		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// Submit labels directly to AMiner API (bypass DOM/keyboard)
+	mux.HandleFunc("/api/submit", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Hash     string              `json:"hash"`
+			Labels   map[string][]string `json:"labels"`
+			TaggerID string              `json:"taggerId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", 400)
+			return
+		}
+		if req.Hash == "" {
+			http.Error(w, "missing hash", 400)
+			return
+		}
+		if req.TaggerID == "" {
+			req.TaggerID = config.TaggerID
+		}
+		if req.TaggerID == "" {
+			http.Error(w, "missing taggerId", 400)
+			return
+		}
+		if config.Token == "" || config.TaskID == "" {
+			http.Error(w, "not configured: token or taskId missing", 400)
+			return
+		}
+
+		record, err := st.GetByHash(req.Hash)
+		if err != nil {
+			http.Error(w, "image not found: "+err.Error(), 404)
+			return
+		}
+
+		// Find assignment_id by searching prompts API for the prompt_id
+		assignmentID := findAssignmentID(config.TaskID, config.StartDate, record.PromptID)
+		if assignmentID == 0 {
+			http.Error(w, "assignment_id not found for prompt "+record.PromptID, 500)
+			return
+		}
+
+		// Construct payload
+		payload := mapLabelsToPayload(req.Labels)
+		respID := genUUID()
+		body := map[string]interface{}{
+			"assignment_id": assignmentID,
+			"tagger_id":     req.TaggerID,
+			"prompt_id":     record.PromptID,
+			"responses": []map[string]interface{}{
+				{"resp_id": respID, "payload": payload},
+			},
+			"task_id": mustAtoi(config.TaskID),
+		}
+
+		bodyJSON, _ := json.Marshal(body)
+		log.Printf("[SUBMIT] Sending: %s", string(bodyJSON))
+
+		resp, err := doAMinerPost(annotBase()+"/api/v1/annotations/annot/responses", bodyJSON)
+		if err != nil {
+			st.UpdateLabelStatus(req.Hash, "", 0, "submit_failed", err.Error())
+			http.Error(w, "submit failed: "+err.Error(), 500)
+			return
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			st.UpdateLabelStatus(req.Hash, "", 0, "cloud_submitted", "API submitted directly")
+			log.Printf("[SUBMIT] Success for hash=%s prompt=%s", req.Hash, record.PromptID)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true,"status":"cloud_submitted"}`))
+		} else {
+			st.UpdateLabelStatus(req.Hash, "", 0, "submit_failed", string(respBody))
+			log.Printf("[SUBMIT] Failed status=%d body=%s", resp.StatusCode, string(respBody))
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"ok":false,"status":"submit_failed","httpStatus":%d,"body":%q}`, resp.StatusCode, string(respBody))
+		}
 	})
 
 	uiSub, _ := fs.Sub(uiFS, "ui")
@@ -575,6 +666,47 @@ func genUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+// findAssignmentID searches the prompts API for the assignment_id matching a given prompt_id
+func findAssignmentID(taskID, startDate, promptID string) int {
+	if taskID == "" || startDate == "" || promptID == "" {
+		return 0
+	}
+	for page := 1; page <= 5; page++ {
+		url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + taskID +
+			"/date/" + startDate + "/v2?page=" + strconv.Itoa(page)
+		resp, err := doAMinerGet(url)
+		if err != nil {
+			log.Printf("[SUBMIT] prompts page %d error: %v", page, err)
+			continue
+		}
+		var data struct {
+			Prompts []struct {
+				ID       int    `json:"id"`
+				PromptID string `json:"prompt_id"`
+			} `json:"prompts"`
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if json.Unmarshal(body, &data) != nil {
+			continue
+		}
+		for _, p := range data.Prompts {
+			if p.PromptID == promptID {
+				return p.ID
+			}
+		}
+		if len(data.Prompts) < 20 {
+			break // last page
+		}
+	}
+	return 0
 }
 
 // labelValue maps user-facing label text to submission payload numeric values
