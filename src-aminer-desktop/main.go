@@ -485,6 +485,10 @@ func main() {
 					if json.Unmarshal([]byte(rb), &sub) == nil && sub.TaggerID != "" {
 						config.TaggerID = sub.TaggerID
 						log.Printf("[SUBMIT] Auto-configured tagger_id=%s", config.TaggerID)
+						// Persist immediately
+						b, _ := json.Marshal(config)
+						os.WriteFile(filepath.Join(dataDir, "config.json"), b, 0644)
+						st.SaveConfig(b)
 					}
 				}
 			}
@@ -570,7 +574,7 @@ func main() {
 		}
 
 		// Find assignment_id by searching prompts API for the prompt_id
-		assignmentID := findAssignmentID(config.TaskID, config.StartDate, record.PromptID)
+		assignmentID := findAssignmentID(config.TaskID, config.StartDate, record.PromptID, record.QuestionNum)
 		if assignmentID == 0 {
 			http.Error(w, "assignment_id not found for prompt "+record.PromptID, 500)
 			return
@@ -674,16 +678,23 @@ func mustAtoi(s string) int {
 }
 
 // findAssignmentID searches the prompts API for the assignment_id matching a given prompt_id
-func findAssignmentID(taskID, startDate, promptID string) int {
+func findAssignmentID(taskID, startDate, promptID string, questionNum int) int {
 	if taskID == "" || startDate == "" || promptID == "" {
 		return 0
 	}
-	for page := 1; page <= 5; page++ {
+	startPage := 1
+	if questionNum > 0 {
+		startPage = (questionNum-1)/20 + 1
+	}
+	// Search startPage and up to 4 adjacent pages
+	for page := startPage; page < startPage+5; page++ {
+		if page < 1 {
+			continue
+		}
 		url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + taskID +
 			"/date/" + startDate + "/v2?page=" + strconv.Itoa(page)
 		resp, err := doAMinerGet(url)
 		if err != nil {
-			log.Printf("[SUBMIT] prompts page %d error: %v", page, err)
 			continue
 		}
 		var data struct {
@@ -701,9 +712,6 @@ func findAssignmentID(taskID, startDate, promptID string) int {
 			if p.PromptID == promptID {
 				return p.ID
 			}
-		}
-		if len(data.Prompts) < 20 {
-			break // last page
 		}
 	}
 	return 0
