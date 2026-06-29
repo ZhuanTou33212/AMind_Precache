@@ -2,6 +2,8 @@ package main
 
 import (
 	"aminer-desktop/store"
+	"bytes"
+	"crypto/rand"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -463,6 +465,30 @@ func main() {
 
 	// Monitor - extension POSTs page state here
 	mux.HandleFunc("/api/monitor", func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+		// Log captured submission API details for direct API research
+		var raw map[string]interface{}
+		if json.Unmarshal(bodyBytes, &raw) == nil {
+			if t, _ := raw["type"].(string); t == "captured-submission-api" {
+				log.Printf("[CAPTURED API] %v %v status=%v body=%v",
+					raw["method"], raw["url"], raw["status"], raw["requestBody"])
+			}
+			if t, _ := raw["type"].(string); t == "captured-prompts-api" {
+				log.Printf("[CAPTURED PROMPTS] %v resp=%v",
+					raw["url"], raw["responseText"])
+			}
+			if t, _ := raw["type"].(string); t == "captured-annot-api" {
+				log.Printf("[CAPTURED ANNOT] %v %v resp=%v",
+					raw["method"], raw["url"], raw["responseText"])
+			}
+			if t, _ := raw["type"].(string); t == "captured-postmessage" {
+				log.Printf("[CAPTURED POSTMSG] %v keys=%v data=%v",
+					raw["msgType"], raw["keys"], raw["data"])
+			}
+		}
+
 		var req struct {
 			Question, Total int
 			PromptID, Type  string
@@ -525,6 +551,58 @@ func doAMinerGet(url string) (*http.Response, error) {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 	return resp, nil
+}
+
+func doAMinerPost(url string, body []byte) (*http.Response, error) {
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+config.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Referer", annotBase()+"/")
+	req.Header.Set("Origin", annotBase())
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func genUUID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// labelValue maps user-facing label text to submission payload numeric values
+var labelValue = map[string]int{
+	"惊艳":   1,
+	"好看":   2,
+	"还不错":  3,
+	"一般":   0,
+	"不堪":   -1,
+	"带水印":  1,
+}
+
+func mapLabelsToPayload(labels map[string][]string) map[string]int {
+	payload := map[string]int{"level": 0, "watermark": 0}
+	for groupID, values := range labels {
+		for _, v := range values {
+			num, ok := labelValue[v]
+			if !ok {
+				continue
+			}
+			if groupID == "quality" {
+				payload["level"] = num
+			} else if groupID == "watermark" {
+				payload["watermark"] = num
+			}
+		}
+	}
+	return payload
 }
 
 func openBrowser(url string) {

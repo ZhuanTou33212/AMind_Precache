@@ -5,6 +5,7 @@
 
   const submitRE = /\/(label|annot|submit|save|answer|mark|review|commit|responses)\b/i;
   const taskRE = /\/v1\/annotations\/annot\/prompts\/task\/(\d+)\/date\/(\d+)\/v2/;
+  const annotRE = /\/api\//i;
   let lastInfo = null;
   let lastSent = '';
   let lastConfigSent = '';
@@ -35,9 +36,21 @@
     };
   }
 
-  // Capture KB-SDK postMessage auth token & task context
+  // Capture KB-SDK postMessage auth token, task context, & annotation data
   window.addEventListener('message', function(e) {
     if (!e.data || typeof e.data !== 'object') return;
+    // Log ALL postMessage events for direct API research
+    var logData = { hasType: !!e.data.type, keys: Object.keys(e.data).join(',') };
+    try { logData.preview = JSON.stringify(e.data).substring(0, 2000); } catch(er) {}
+    emit({
+      type: 'captured-postmessage',
+      msgType: e.data.type || '(no type)',
+      keys: Object.keys(e.data).join(','),
+      data: (function(){try{return JSON.stringify(e.data).substring(0,5000)}catch(e){return String(e).substring(0,500)}})()
+    });
+    console.groupCollapsed('[Monitor main] postMessage keys=' + logData.keys);
+    try { console.log(JSON.stringify(e.data).substring(0, 2000)); } catch(er) { console.log(String(e.data)); }
+    console.groupEnd();
     // KB-SDK auth token
     if (e.data.type === 'auth' && e.data.token) reportConfig(e.data.token);
     // KB-SDK task context — extract taskId and startDate
@@ -68,6 +81,14 @@
                 if (data.id) detectedTaskId = String(data.id);
                 if (data.startDate) detectedStartDate = String(data.startDate);
                 if (data.taskId) detectedTaskId = String(data.taskId);
+                if (data.type) {
+                  emit({
+                    type: 'captured-postmessage',
+                    msgType: 'iframe-out:' + data.type,
+                    keys: Object.keys(data).join(','),
+                    data: JSON.stringify(data).substring(0, 5000)
+                  });
+                }
               }
             } catch(e) {}
             return origPM.call(cw, data, targetOrigin, transfer);
@@ -187,13 +208,46 @@
     target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
   }
 
+  function clickButtonByText(words) {
+    var all = document.querySelectorAll('button, [role="button"], a, span, div');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var text = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+      for (var w = 0; w < words.length; w++) {
+        if (text.indexOf(words[w]) >= 0) {
+          console.log('[Monitor main] clickButtonByText found:', words[w], 'on', el.tagName, text.substring(0, 40));
+          el.click();
+          // Also dispatch MouseEvent for React synthetic event compatibility
+          try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   function simulateKeyMapping() {
     const target = document.activeElement || document.body;
-    dispatchKey(target, 'Enter', { ctrlKey: true });
+
+    // Priority 1: click DOM submit/confirm buttons
+    console.log('[Monitor main] key mapping step 1: try click submit button');
+    var clicked = clickButtonByText(['提交', '确定', '确认', 'Submit', 'OK']);
+
+    if (!clicked) {
+      // Priority 2: keyboard simulation as fallback
+      console.log('[Monitor main] key mapping step 1: fallback Ctrl+Enter');
+      dispatchKey(target, 'Enter', { ctrlKey: true });
+    }
+
     setTimeout(function() {
-      dispatchKey(target, 'Enter', {});
-    }, 500);
-    console.log('[Monitor main] key mapping: Ctrl+Enter -> Enter');
+      console.log('[Monitor main] key mapping step 2: try click confirm button');
+      var clicked2 = clickButtonByText(['确认无误', '确认', '确定', 'Confirm', 'OK']);
+      if (!clicked2) {
+        console.log('[Monitor main] key mapping step 2: fallback Enter');
+        dispatchKey(target, 'Enter', {});
+      }
+      console.log('[Monitor main] key mapping done');
+    }, 600);
   }
 
   async function reportSubmission() {
@@ -251,15 +305,49 @@
     }
     return xhrSetRequestHeader.apply(this, arguments);
   };
-  XMLHttpRequest.prototype.send = function() {
+  XMLHttpRequest.prototype.send = function(body) {
+    this.__aminerBody = body;
     this.addEventListener('loadend', () => {
       const method = this.__aminerMethod || '';
       const url = this.__aminerURL || '';
       captureTaskFromURL(url);
-      if (this.status >= 200 && this.status < 300 &&
-          (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-          submitRE.test(url)) {
-        reportSubmission();
+      if (this.status >= 200 && this.status < 300) {
+        // Capture all annotation API responses for direct API research
+        if (annotRE.test(url)) {
+          console.groupCollapsed('[Monitor main] CAPTURED ANNOT API ' + method + ' ' + url.substring(0, 80));
+          console.log('Response:', (this.responseText || '').substring(0, 3000));
+          console.groupEnd();
+          emit({
+            type: 'captured-annot-api',
+            url: url,
+            method: method,
+            responseText: (this.responseText || '').substring(0, 5000)
+          });
+        }
+        // Capture submission API details for direct API research
+        if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && submitRE.test(url)) {
+          var bodyPreview = '';
+          try {
+            if (typeof this.__aminerBody === 'string') bodyPreview = this.__aminerBody;
+            else if (this.__aminerBody) bodyPreview = JSON.stringify(this.__aminerBody);
+          } catch(e) {}
+          console.groupCollapsed('[Monitor main] CAPTURED SUBMISSION API');
+          console.log('URL:', url);
+          console.log('Method:', method);
+          console.log('Status:', this.status);
+          console.log('Request body:', bodyPreview);
+          console.log('Response:', (this.responseText || '').substring(0, 500));
+          console.groupEnd();
+          emit({
+            type: 'captured-submission-api',
+            url: url,
+            method: method,
+            requestBody: bodyPreview,
+            status: this.status,
+            responsePreview: (this.responseText || '').substring(0, 2000)
+          });
+          reportSubmission();
+        }
       }
     });
     return xhrSend.apply(this, arguments);
@@ -270,15 +358,50 @@
     window.fetch = function(input, init) {
       const url = typeof input === 'string' ? input : String(input?.url || '');
       const method = String(init?.method || input?.method || 'GET').toUpperCase();
+      const body = init?.body;
       const headers = new Headers(init?.headers || input?.headers || {});
       const authorization = headers.get('authorization');
       captureTaskFromURL(url);
       if (authorization) reportConfig(authorization);
       return nativeFetch.apply(this, arguments).then((response) => {
-        if (response.ok &&
-            (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-            submitRE.test(url)) {
-          reportSubmission();
+        if (response.ok) {
+          // Capture all annotation API responses
+          if (annotRE.test(url)) {
+            response.clone().text().then(function(text) {
+              console.groupCollapsed('[Monitor main] CAPTURED ANNOT API (fetch) ' + method + ' ' + url.substring(0, 80));
+              console.log('Response:', text.substring(0, 3000));
+              console.groupEnd();
+              emit({
+                type: 'captured-annot-api',
+                url: url,
+                method: method,
+                responseText: text.substring(0, 5000)
+              });
+            });
+          }
+          // Capture submission API
+          if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && submitRE.test(url)) {
+            var bodyPreview = '';
+            try {
+              if (typeof body === 'string') bodyPreview = body;
+              else if (body) bodyPreview = JSON.stringify(body);
+            } catch(e) {}
+            console.groupCollapsed('[Monitor main] CAPTURED SUBMISSION API (fetch)');
+            console.log('URL:', url);
+            console.log('Method:', method);
+            console.log('Status:', response.status);
+            console.log('Request body:', bodyPreview);
+            console.groupEnd();
+            emit({
+              type: 'captured-submission-api',
+              url: url,
+              method: method,
+              requestBody: bodyPreview,
+              status: response.status,
+              responsePreview: ''
+            });
+            reportSubmission();
+          }
         }
         return response;
       });
