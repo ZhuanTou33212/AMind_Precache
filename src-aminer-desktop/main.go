@@ -763,11 +763,11 @@ func findAssignmentID(taskID, startDate, promptID string, questionNum int) int {
 // labelValue maps user-facing label text to submission payload numeric values
 var labelValue = map[string]int{
 	"惊艳":   1,
-	"好看":   2,
-	"还不错":  3,
+	"好看":   3,  // 推测值，建议手动提交一次确认
+	"还不错":  2,
 	"一般":   0,
 	"不堪":   -1,
-	"带边框":  4,
+	"带边框":  4,  // 推测值，建议手动提交一次确认
 	"带水印":  1,
 }
 
