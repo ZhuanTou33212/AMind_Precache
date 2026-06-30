@@ -585,21 +585,45 @@ func main() {
 			return
 		}
 		type statResult struct {
-			Total     int      `json:"total"`
-			Annotated int      `json:"annotated"`
-			Pending   int      `json:"pending"`
-			Suspicious []int   `json:"suspicious"` // state=1 but empty Prompt
-			Errors    []string `json:"errors,omitempty"`
+			Total      int      `json:"total"`
+			Annotated  int      `json:"annotated"`
+			Pending    int      `json:"pending"`
+			AnnotatedQ []int   `json:"annotatedQuestions"` // all annotated question numbers
+			Suspicious []int   `json:"suspicious"`          // state=1 but empty Prompt
+			Errors     []string `json:"errors,omitempty"`
 		}
 		result := statResult{}
+		basePage := strings.TrimPrefix(r.URL.Query().Get("fromPage"), "")
 		page := 1
+		if basePage != "" {
+			if n, err := strconv.Atoi(basePage); err == nil && n > 0 {
+				page = n
+			}
+		}
+		// First call: get indicator for start page
+		startResp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			"/date/" + config.StartDate + "/v2?page=1")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		var indicator struct {
+			Indicator struct{ TotalCnt int `json:"total_cnt"` } `json:"indicator"`
+		}
+		ibody, _ := io.ReadAll(startResp.Body)
+		startResp.Body.Close()
+		json.Unmarshal(ibody, &indicator)
+		result.Total = indicator.Indicator.TotalCnt
+		pageStart := page
 		for {
 			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 			resp, err := doAMinerGet(url)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("page %d: %v", page, err))
-				break
+				if page-pageStart > 5 { break }
+				page++
+				continue
 			}
 			var data struct {
 				Prompts   []struct {
@@ -609,28 +633,33 @@ func main() {
 					Prompt   string `json:"Prompt"`
 				} `json:"prompts"`
 				TotalPage int `json:"total_page"`
+				PageSize  int `json:"page_size"`
 			}
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if json.Unmarshal(body, &data) != nil {
 				break
 			}
-			result.Total += len(data.Prompts)
-			for _, p := range data.Prompts {
+			qBase := (page-1)*data.PageSize + 1
+			for i, p := range data.Prompts {
+				qn := qBase + i
 				if p.State == 1 {
 					result.Annotated++
+					result.AnnotatedQ = append(result.AnnotatedQ, qn)
 					if p.Prompt == "" || p.Prompt == " " {
-						result.Suspicious = append(result.Suspicious, p.ID)
+						result.Suspicious = append(result.Suspicious, qn)
 					}
 				} else {
 					result.Pending++
 				}
 			}
-			if page >= data.TotalPage || len(data.Prompts) < 20 {
+			if page >= data.TotalPage || len(data.Prompts) < data.PageSize {
 				break
 			}
 			page++
 		}
+		// Deduplicate & sort
+		result.Pending = result.Total - result.Annotated
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(result)
 	})

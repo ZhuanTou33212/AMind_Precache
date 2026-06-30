@@ -145,7 +145,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 
 <div class="panel" id="cacheSlotPanel">
   <h2>图片缓存槽 <span id="slotStats" class="stats"></span>
-    <button class="btn" style="margin-left:12px;background:#6366f1;color:#fff" onclick="queryStats()">查询统计</button>
+    <button class="btn" style="margin-left:12px;background:#6366f1;color:#fff" onclick="queryStats()">查询标注统计</button>
   </h2>
   <div class="slot-layout">
     <div class="slot-panel" id="unlabeledSlot">
@@ -211,6 +211,21 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
       </div>
       <div id="debugEntries" style="max-height:240px;overflow-y:auto;font:11px 'Courier New',monospace;background:#0a0f1a;border-radius:4px;padding:8px;color:#7dd3c7">
         <span style="color:#666">点击刷新加载日志...</span>
+      </div>
+    </div>
+
+    <div class="slot-panel" id="statsPanel" style="border-color:#6366f1;display:none">
+      <div class="slot-head">
+        <h3>标注统计</h3>
+        <span id="statsSummary" style="font-size:12px;color:#7dd3c7"></span>
+      </div>
+      <div class="slot-actions">
+        <button class="btn" onclick="queryStats()">刷新统计</button>
+        <button class="btn" onclick="$('#statsPanel').style.display='none'" style="font-size:11px">关闭</button>
+        <span id="statsSuspiciousHint" style="font-size:11px;color:#e5a97d;display:none"></span>
+      </div>
+      <div id="statsAnnotatedQ" style="max-height:300px;overflow-y:auto;font:11px monospace;background:#0a0f1a;border-radius:4px;padding:8px;color:#7dd3c7">
+        <span style="color:#666">点击查询加载...</span>
       </div>
     </div>
   </div>
@@ -726,20 +741,44 @@ async function requestDirectAPISubmit(all){
 }
 
 async function queryStats(){
-  toast('正在查询标注统计...');
+  var panel=$('#statsPanel'),summary=$('#statsSummary'),list=$('#statsAnnotatedQ'),hint=$('#statsSuspiciousHint');
+  if(!panel)return;
+  panel.style.display='block';
+  summary.textContent='查询中...';
+  list.innerHTML='<span style="color:#888">正在轮询标注接口...</span>';
   try{
     var s=await api('/api/stats');
-    if(s.errors&&s.errors.length)toast('部分页面获取失败','#e5a97d');
-    if(s.total===0)return toast('无数据，请确认配置正确','#d94848');
-    var pct=s.total?(s.annotated/s.total*100).toFixed(1):0;
-    var msg=['总量: '+s.total,'已标注: '+s.annotated+' ('+pct+'%)','待标注: '+s.pending];
-    if(s.suspicious&&s.suspicious.length){
-      msg.push('异常: '+s.suspicious.length+' 个已标注但 Prompt 为空');
-      toast('异常: '+s.suspicious.join(', '),'#e5a97d');
+    if(!s.total)return summary.textContent='无数据，请确认配置正确',void(list.innerHTML='');
+    var pct=(s.annotated/s.total*100).toFixed(1);
+    summary.textContent='总量: '+s.total+' | 已标注: '+s.annotated+' ('+pct+'%) | 待标注: '+s.pending;
+    // Render annotated question numbers
+    if(s.annotatedQuestions&&s.annotatedQuestions.length){
+      var maxShow=300;
+      var qs=s.annotatedQuestions.slice(0,maxShow);
+      var cols=10;
+      var html='';
+      for(var i=0;i<qs.length;i+=cols){
+        html+=qs.slice(i,i+cols).map(function(q){
+          var isSusp=s.suspicious&&s.suspicious.indexOf(q)>=0;
+          return '<span style="'+(isSusp?'color:#d94848;font-weight:bold':'')+'">Q'+q+'</span>';
+        }).join(' ') + '\n';
+      }
+      if(s.annotatedQuestions.length>maxShow)html+='... (+'+(s.annotatedQuestions.length-maxShow)+' more)';
+      list.innerHTML='<pre style="margin:0;white-space:pre-wrap">'+html+'</pre>';
+    }else{
+      list.innerHTML='<span style="color:#666">暂无已标注记录</span>';
     }
-    toast(msg.join(' | '));
-    if(s.suspicious&&s.suspicious.length)console.warn('Suspicious annotation IDs (state=1 but empty Prompt):',s.suspicious);
-  }catch(e){toast('查询失败: '+e.message,'#d94848')}
+    // Suspicious items
+    if(s.suspicious&&s.suspicious.length){
+      hint.style.display='inline';
+      hint.textContent='异常: '+s.suspicious.length+' 个(已标注但Prompt为空)';
+    }else{
+      hint.style.display='none';
+    }
+  }catch(e){
+    summary.textContent='查询失败: '+e.message;
+    list.innerHTML='<span style="color:#d94848">错误</span>';
+  }
 }
 
 async function refreshDebugLog(){
