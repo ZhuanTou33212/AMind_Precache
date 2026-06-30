@@ -819,6 +819,85 @@ func main() {
 		})
 	})
 
+	// Verify — check annotated items' bench/questions responses for data integrity
+	mux.HandleFunc("/api/verify", func(w http.ResponseWriter, r *http.Request) {
+		if config.Token == "" || config.TaskID == "" || config.StartDate == "" {
+			http.Error(w, "not configured", 400)
+			return
+		}
+		type verifyResult struct {
+			Checked    int      `json:"checked"`
+			OK         int      `json:"ok"`
+			Failed     int      `json:"failed"`
+			FailedQ    []int    `json:"failedQuestions"`
+			TotalAnnot int      `json:"totalAnnotated"`
+			Errors     []string `json:"errors,omitempty"`
+		}
+		result := verifyResult{}
+		var annotated []struct{
+			PromptID    string
+			QuestionNum int
+		}
+		for page := 1; page <= 3; page++ {
+			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
+			resp, err := doAMinerGet(url)
+			if err != nil { break }
+			var data struct {
+				Prompts []struct{
+					PromptID string `json:"prompt_id"`
+					State    int    `json:"state"`
+				} `json:"prompts"`
+				PageSize int `json:"page_size"`
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			json.Unmarshal(body, &data)
+			qBase := (page-1)*data.PageSize + 1
+			for i, p := range data.Prompts {
+				if p.State == 1 {
+					annotated = append(annotated, struct{
+						PromptID    string
+						QuestionNum int
+					}{p.PromptID, qBase + i})
+				}
+			}
+			if len(data.Prompts) < data.PageSize { break }
+		}
+		result.TotalAnnot = len(annotated)
+		maxCheck := 10
+		for idx, a := range annotated {
+			if idx >= maxCheck { break }
+			qURL := annotBase() + "/api/v1/bench/questions/" + a.PromptID + "?uid="
+			qResp, err := doAMinerGet(qURL)
+			result.Checked++
+			if err != nil {
+				result.Failed++
+				result.FailedQ = append(result.FailedQ, a.QuestionNum)
+				continue
+			}
+			qBody, _ := io.ReadAll(qResp.Body)
+			qResp.Body.Close()
+			var qData struct {
+				Responses []struct{ Reply string `json:"reply"` } `json:"responses"`
+			}
+			json.Unmarshal(qBody, &qData)
+			ok := false
+			for _, rp := range qData.Responses {
+				if rp.Reply != "" && strings.Contains(rp.Reply, "oss-cn-") {
+					ok = true
+					break
+				}
+			}
+			if ok { result.OK++ } else {
+				result.Failed++
+				result.FailedQ = append(result.FailedQ, a.QuestionNum)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(result)
+	})
+
 	// Debug log — returns failed transfers and suspicious items
 	mux.HandleFunc("/api/debug-log", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
