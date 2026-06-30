@@ -588,8 +588,7 @@ func main() {
 			Total      int      `json:"total"`
 			Annotated  int      `json:"annotated"`
 			Pending    int      `json:"pending"`
-			AnnotatedQ []int   `json:"annotatedQuestions"` // all annotated question numbers
-			Suspicious []int   `json:"suspicious"`          // state=1 but empty Prompt
+			Suspicious []int   `json:"suspicious"`
 			Errors     []string `json:"errors,omitempty"`
 		}
 		result := statResult{}
@@ -645,8 +644,6 @@ func main() {
 			qn := qBase + i
 			if p.State == 1 {
 				result.Annotated++
-				result.AnnotatedQ = append(result.AnnotatedQ, qn)
-				// Real suspicious check: prompt_id is empty or not a valid UUID
 				if p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-") {
 					result.Suspicious = append(result.Suspicious, qn)
 				}
@@ -659,10 +656,108 @@ func main() {
 			}
 			page++
 		}
-		// Deduplicate & sort
 		result.Pending = result.Total - result.Annotated
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(result)
+	})
+
+	// Label stats — per-label counts from local SQLite + abnormal items
+	mux.HandleFunc("/api/label-stats", func(w http.ResponseWriter, r *http.Request) {
+		images := st.ListImages()
+		type labelCount struct {
+			GroupID   string `json:"groupId"`
+			Label     string `json:"label"`
+			Count     int    `json:"count"`
+		}
+		// Query AMiner stats
+		amTotal, amAnnotated := 0, 0
+		var amSuspicious []int
+		if config.Token != "" && config.TaskID != "" && config.StartDate != "" {
+			startResp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+				"/date/" + config.StartDate + "/v2?page=1")
+			if err == nil {
+				var indicator struct {
+					Indicator struct{ TotalCnt int `json:"total_cnt"` } `json:"indicator"`
+				}
+				ibody, _ := io.ReadAll(startResp.Body)
+				startResp.Body.Close()
+				json.Unmarshal(ibody, &indicator)
+				amTotal = indicator.Indicator.TotalCnt
+				// Scan first 3 pages for annotated count & suspicious
+				for page := 1; page <= 3; page++ {
+					url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+						"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
+					resp, err := doAMinerGet(url)
+					if err != nil { break }
+					var data struct {
+						Prompts []struct{
+							PromptID string `json:"prompt_id"`
+							State    int    `json:"state"`
+						} `json:"prompts"`
+						PageSize int `json:"page_size"`
+					}
+					body, _ := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if json.Unmarshal(body, &data) != nil { break }
+					qBase := (page-1)*data.PageSize + 1
+					for i, p := range data.Prompts {
+						if p.State == 1 {
+							amAnnotated++
+							if p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-") {
+								amSuspicious = append(amSuspicious, qBase+i)
+							}
+						}
+					}
+					if len(data.Prompts) < data.PageSize { break }
+				}
+			}
+		}
+		// Per-label counts from local cache
+		labelMap := map[string]int{}
+		var failedQ []int
+		for _, img := range images {
+			if img.LabelText != "" {
+				labelMap[img.LabelText]++
+				if img.LabelStatus == "submit_failed" {
+					failedQ = append(failedQ, img.QuestionNum)
+				}
+			}
+		}
+		// Build label count list
+		var counts []labelCount
+		// Try to read labels-config to get group info
+		cfgPath := filepath.Join(dataDir, "labels-config.json")
+		cfgBody, _ := os.ReadFile(cfgPath)
+		if len(cfgBody) >= 3 && cfgBody[0] == 0xEF && cfgBody[1] == 0xBB && cfgBody[2] == 0xBF {
+			cfgBody = cfgBody[3:]
+		}
+		if len(cfgBody) == 0 { cfgBody = defaultLabelsConfig }
+		var lCfg struct {
+			Groups []struct {
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Options []struct {
+					Label string `json:"label"`
+				} `json:"options"`
+			} `json:"groups"`
+		}
+		if json.Unmarshal(cfgBody, &lCfg) == nil {
+			for _, g := range lCfg.Groups {
+				for _, opt := range g.Options {
+					cnt := labelMap[opt.Label]
+					counts = append(counts, labelCount{GroupID: g.ID, Label: opt.Label, Count: cnt})
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"labels":        counts,
+			"groups":        lCfg.Groups,
+			"amTotal":       amTotal,
+			"amAnnotated":   amAnnotated,
+			"amSuspicious":  amSuspicious,
+			"failedQ":       failedQ,
+		})
 	})
 
 	// Debug log — returns failed transfers and suspicious items

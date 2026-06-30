@@ -745,40 +745,45 @@ async function queryStats(){
   if(!panel)return;
   panel.style.display='block';
   summary.textContent='查询中...';
-  list.innerHTML='<span style="color:#888">正在轮询标注接口...</span>';
+  list.innerHTML='<span style="color:#888">正在查询本地数据库...</span>';
   try{
-    var s=await api('/api/stats');
-    if(!s.total)return summary.textContent='无数据，请确认配置正确',void(list.innerHTML='');
-    var pct=(s.annotated/s.total*100).toFixed(1);
-    summary.textContent='总量: '+s.total+' | 已标注: '+s.annotated+' ('+pct+'%) | 待标注: '+s.pending;
-    // Render annotated question numbers
-    if(s.annotatedQuestions&&s.annotatedQuestions.length){
-      var maxShow=300;
-      var qs=s.annotatedQuestions.slice(0,maxShow);
-      var cols=10;
-      var html='';
-      for(var i=0;i<qs.length;i+=cols){
-        html+=qs.slice(i,i+cols).map(function(q){
-          var isSusp=s.suspicious&&s.suspicious.indexOf(q)>=0;
-          return '<span style="'+(isSusp?'color:#d94848;font-weight:bold':'')+'">Q'+q+'</span>';
-        }).join(' ') + '\n';
+    var s=await api('/api/label-stats');
+    // Summary line
+    var pct=s.amTotal?(s.amAnnotated/s.amTotal*100).toFixed(1):0;
+    summary.textContent='AMiner: '+s.amAnnotated+'/'+s.amTotal+' ('+pct+'%)';
+    // Render per-label grid
+    var html='';
+    if(s.groups&&s.groups.length){
+      for(var g=0;g<s.groups.length;g++){
+        var group=s.groups[g];
+        html+='<div style="margin-bottom:8px"><b style="color:#f0c060">'+group.name+'</b> ';
+        for(var o=0;o<group.options.length;o++){
+          var opt=group.options[o];
+          var cnt=0;
+          for(var l=0;l<s.labels.length;l++){
+            if(s.labels[l].label===opt.label&&s.labels[l].groupId===group.id){cnt=s.labels[l].count;break}
+          }
+          html+='<span style="display:inline-block;background:#162038;color:#7dd3c7;border-radius:3px;padding:2px 6px;margin:2px;font-size:11px">'+opt.label+' <b>'+cnt+'</b></span> ';
+        }
+        html+='</div>';
       }
-      if(s.annotatedQuestions.length>maxShow)html+='... (+'+(s.annotatedQuestions.length-maxShow)+' more)';
-      list.innerHTML='<pre style="margin:0;white-space:pre-wrap">'+html+'</pre>';
-    }else{
-      list.innerHTML='<span style="color:#666">暂无已标注记录</span>';
     }
-    // Suspicious items
-    if(s.suspicious&&s.suspicious.length){
-      hint.style.display='inline';
-      hint.textContent='异常: '+s.suspicious.length+' 个(prompt_id无效的已标注项)';
-    }else{
-      hint.style.display='none';
+    // Abnormal items
+    var abnormal=[];
+    if(s.failedQ&&s.failedQ.length)abnormal=abnormal.concat(s.failedQ.map(function(q){return {q:q,reason:'提交失败'}}));
+    if(s.amSuspicious&&s.amSuspicious.length)abnormal=abnormal.concat(s.amSuspicious.map(function(q){return {q:q,reason:'prompt_id无效'}}));
+    if(abnormal.length){
+      html+='<div style="margin-top:8px"><b style="color:#d94848">异常题号:</b><br>';
+      abnormal.sort(function(a,b){return a.q-b.q});
+      var seen={};
+      for(var a=0;a<abnormal.length;a++){
+        if(seen[abnormal[a].q])continue;seen[abnormal[a].q]=true;
+        html+='<span style="color:#d94848;font-size:10px">Q'+abnormal[a].q+'('+abnormal[a].reason+')</span> ';
+      }
+      html+='</div>';
     }
-  }catch(e){
-    summary.textContent='查询失败: '+e.message;
-    list.innerHTML='<span style="color:#d94848">错误</span>';
-  }
+    list.innerHTML=html||'<span style="color:#666">暂无数据</span>';
+  }catch(e){summary.textContent='查询失败: '+e.message;list.innerHTML='<span style="color:#d94848">'+e.message+'</span>'}
 }
 
 async function refreshDebugLog(){
