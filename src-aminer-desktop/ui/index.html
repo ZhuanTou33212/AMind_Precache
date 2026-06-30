@@ -771,7 +771,7 @@ async function queryStats(){
     // Suspicious items
     if(s.suspicious&&s.suspicious.length){
       hint.style.display='inline';
-      hint.textContent='异常: '+s.suspicious.length+' 个(已标注但Prompt为空)';
+      hint.textContent='异常: '+s.suspicious.length+' 个(prompt_id无效的已标注项)';
     }else{
       hint.style.display='none';
     }

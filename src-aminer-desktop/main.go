@@ -640,19 +640,20 @@ func main() {
 			if json.Unmarshal(body, &data) != nil {
 				break
 			}
-			qBase := (page-1)*data.PageSize + 1
-			for i, p := range data.Prompts {
-				qn := qBase + i
-				if p.State == 1 {
-					result.Annotated++
-					result.AnnotatedQ = append(result.AnnotatedQ, qn)
-					if p.Prompt == "" || p.Prompt == " " {
-						result.Suspicious = append(result.Suspicious, qn)
-					}
-				} else {
-					result.Pending++
+		qBase := (page-1)*data.PageSize + 1
+		for i, p := range data.Prompts {
+			qn := qBase + i
+			if p.State == 1 {
+				result.Annotated++
+				result.AnnotatedQ = append(result.AnnotatedQ, qn)
+				// Real suspicious check: prompt_id is empty or not a valid UUID
+				if p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-") {
+					result.Suspicious = append(result.Suspicious, qn)
 				}
+			} else {
+				result.Pending++
 			}
+		}
 			if page >= data.TotalPage || len(data.Prompts) < data.PageSize {
 				break
 			}
