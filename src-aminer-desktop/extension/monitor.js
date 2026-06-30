@@ -2,26 +2,113 @@
   'use strict';
 
   const SERVER = 'http://127.0.0.1:9800';
-  const OSS_HOST = 'mm-group-image.oss-cn-beijing.aliyuncs.com';
 
-  let port = chrome.runtime.connect({ name: 'monitor' });
+  let port = null;
+  let reconnectDelay = 2000;
   let cacheByObject = new Map();
+  let ossHost = 'mm-group-image.oss-cn-beijing.aliyuncs.com';
+
+  function connectPort() {
+    try {
+      port = chrome.runtime.connect({ name: 'monitor' });
+      reconnectDelay = 2000;
+      port.onDisconnect.addListener(onDisconnect);
+      port.onMessage.addListener(handleMessage);
+      return true;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  function onDisconnect() {
+    setTimeout(() => {
+      connectPort();
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    }, reconnectDelay);
+  }
+
+  connectPort();
 
   function send(msg) {
+    if (!port) { connectPort(); if (!port) return; }
+    try { port.postMessage(msg); } catch(e) { onDisconnect(); }
+  }
+
+  // Auto-detect token & config from page localStorage (injected into MAIN world)
+  function injectConfigSniffer() {
     try {
-      port.postMessage(msg);
-    } catch (e) {
-      try {
-        port = chrome.runtime.connect({ name: 'monitor' });
-        port.postMessage(msg);
-      } catch (ex) {}
+      const scr = document.createElement('script');
+      scr.textContent = `(function(){
+  if (!localStorage) return;
+  try {
+    var token = localStorage.getItem('Access-Token');
+    var origin = location.origin;
+    var m = location.pathname.match(/label_page_feed\\/([^\\/?#]+)/);
+    var taskId = m ? m[1] : '';
+    var params = new URLSearchParams(location.search);
+    var startDate = params.get('start') || '';
+    if (token && taskId) {
+      var key = token.substring(0,20) + '|' + origin + '|' + taskId + '|' + startDate;
+      if (key !== window.__aminerLastKey) {
+        window.__aminerLastKey = key;
+        document.dispatchEvent(new CustomEvent('aminer-config', {detail:{type:'config',token:token,taskId:taskId,startDate:startDate,platformUrl:origin}}));
+      }
     }
+    if (origin !== window.__aminerLastPlatform) {
+      window.__aminerLastPlatform = origin;
+      document.dispatchEvent(new CustomEvent('aminer-config', {detail:{type:'platform-init',platformUrl:origin}}));
+    }
+  } catch(e){}
+})()`;
+      (document.head || document.body || document.documentElement).appendChild(scr);
+      scr.remove();
+    } catch(e) {}
+  }
+
+  document.addEventListener('aminer-config', function(event) {
+    if (event.detail && event.detail.token) send(event.detail);
+    if (event.detail && event.detail.type === 'platform-init') send(event.detail);
+  });
+
+  injectConfigSniffer();
+  setInterval(injectConfigSniffer, 8000);
+
+  console.log('[Monitor bridge] loaded');
+
+  function handleMessage(msg) {
+    if (msg.ossHost) ossHost = msg.ossHost;
+    if (msg.type === 'cache-list' && msg.images) {
+      const next = new Map();
+      for (const image of msg.images) {
+        const key = objectKey(image.url || '');
+        if (key && image.hash) next.set(key, image);
+      }
+      cacheByObject = next;
+      replaceImages();
+    }
+    if (msg.type === 'verify-oss-batch' && msg.items && msg.items.length) {
+      verifyOSSBatch(msg.items);
+    }
+  }
+
+  async function verifyOSSBatch(items) {
+    var results = [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      try {
+        var r = await fetch(item.ossUrl, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' });
+        results.push({ q: item.q, status: r.ok ? 'ok' : 'fail' });
+      } catch(e) {
+        results.push({ q: item.q, status: 'fail' });
+      }
+    }
+    send({ type: 'oss-verify-results', results: results, taskId: items[0] && items[0].taskId || '' });
   }
 
   function objectKey(rawURL) {
     try {
       const url = new URL(rawURL, location.href);
-      if (url.hostname !== OSS_HOST) return '';
+      if (url.hostname !== ossHost) return '';
       return url.origin + url.pathname;
     } catch (e) {
       return '';
@@ -71,7 +158,7 @@
     for (const node of document.querySelectorAll('source[srcset], img[srcset]')) {
       const current = node.getAttribute('srcset') || '';
       let original = node.dataset.aminerOriginalSrcset || current;
-      if (current.includes(OSS_HOST) && current !== original) original = current;
+      if (current.includes(ossHost) && current !== original) original = current;
       const next = replaceSrcSet(original);
       if (next !== current) {
         node.dataset.aminerOriginalSrcset = original;
@@ -79,10 +166,10 @@
       }
     }
 
-    for (const node of document.querySelectorAll('[style*="' + OSS_HOST + '"]')) {
+    for (const node of document.querySelectorAll('[style*="' + ossHost + '"]')) {
       const current = node.getAttribute('style') || '';
       let original = node.dataset.aminerOriginalStyle || current;
-      if (current.includes(OSS_HOST) && current !== original) original = current;
+      if (current.includes(ossHost) && current !== original) original = current;
       const next = replaceStyleURLs(original);
       if (next !== current) {
         node.dataset.aminerOriginalStyle = original;
@@ -90,18 +177,6 @@
       }
     }
   }
-
-  port.onMessage.addListener((msg) => {
-    if (msg.type === 'cache-list' && msg.images) {
-      const next = new Map();
-      for (const image of msg.images) {
-        const key = objectKey(image.url || '');
-        if (key && image.hash) next.set(key, image);
-      }
-      cacheByObject = next;
-      replaceImages();
-    }
-  });
 
   function readPageInfo() {
     const text = (document.body?.textContent || '').replace(/\s+/g, '');

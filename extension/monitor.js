@@ -86,6 +86,23 @@
       cacheByObject = next;
       replaceImages();
     }
+    if (msg.type === 'verify-oss-batch' && msg.items && msg.items.length) {
+      verifyOSSBatch(msg.items);
+    }
+  }
+
+  async function verifyOSSBatch(items) {
+    var results = [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      try {
+        var r = await fetch(item.ossUrl, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' });
+        results.push({ q: item.q, status: r.ok ? 'ok' : 'fail' });
+      } catch(e) {
+        results.push({ q: item.q, status: 'fail' });
+      }
+    }
+    send({ type: 'oss-verify-results', results: results, taskId: items[0] && items[0].taskId || '' });
   }
 
   function objectKey(rawURL) {

@@ -223,6 +223,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
         <button class="btn" onclick="syncAnnotations()">全量同步</button>
         <button class="btn" onclick="queryStats()">刷新统计</button>
         <button class="btn" style="background:#14b8a6;color:#fff" onclick="verifyAnnotated()">验证已标注图片</button>
+        <button class="btn" style="background:#f59e0b;color:#fff" id="verifyOssBtn" onclick="verifyOSS()">验证OSS图片</button>
         <button class="btn" onclick="$('#statsPanel').style.display='none'" style="font-size:11px">关闭</button>
         <span id="statsSuspiciousHint" style="font-size:11px;color:#e5a97d;display:none"></span>
       </div>
@@ -761,6 +762,37 @@ async function syncAnnotations(){
     html+='</div>';
     list.innerHTML=html;
   }catch(e){summary.textContent='同步失败: '+e.message;list.innerHTML=e.message}
+}
+
+async function verifyOSS(){
+  var panel=$('#statsPanel'),list=$('#statsAnnotatedQ'),summary=$('#statsSummary'),btn=$('#verifyOssBtn');
+  panel.style.display='block'; btn.disabled=true; btn.textContent='验证中...';
+  summary.textContent='OSS验证: 准备任务...';
+  list.innerHTML='<div style="color:#888">正在扫描已标注题目，获取OSS链接...</div>';
+  try{
+    var task=await api('/api/verify-oss',{method:'POST'});
+    var barId='ossProgressBar';
+    list.innerHTML='<div style="margin:8px 0"><div class="progress" style="height:6px"><div id="'+barId+'" style="width:0%;background:#f59e0b;transition:width .3s"></div></div></div>';
+    list.innerHTML+='<div id="ossResultList" style="margin-top:8px;font-size:11px"><span style="color:#888">浏览器扩展正在HEAD验证...</span></div>';
+    // Poll progress
+    for(var i=0;i<120;i++){
+      await new Promise(function(r){setTimeout(r,2000)});
+      var p=await api('/api/verify-oss');
+      if(p.preparing){summary.textContent='OSS验证: 准备链接中...';continue}
+      var bar=$('#'+barId);if(bar&&p.total)bar.style.width=(p.done/p.total*100)+'%';
+      summary.textContent='OSS验证: '+p.done+'/'+p.total;
+      if(p.finished||p.done>=p.total)break
+    }
+    var final=await api('/api/verify-oss');
+    var bar=$('#'+barId);if(bar&&final.total)bar.style.width='100%';
+    if(final.failedQ && final.failedQ.length){
+      summary.textContent='OSS完成: '+final.done+'/'+final.total+' | 异常: '+final.failedQ.length;
+      var res=$('#ossResultList');if(res)res.innerHTML='<div style="color:#d94848;margin-top:6px">异常题号: '+final.failedQ.map(function(q){return 'Q'+q}).join(', ')+'</div>';
+    }else{
+      summary.textContent='OSS完成: '+final.done+'/'+final.total+' 全部正常';
+    }
+  }catch(e){summary.textContent='OSS验证失败: '+e.message}
+  btn.disabled=false;btn.textContent='验证OSS图片';
 }
 
 async function verifyAnnotated(){

@@ -156,40 +156,32 @@ chrome.runtime.onConnect.addListener(port => {
   }, 1000);
   port.onMessage.addListener(async msg => {
     if (msg.type === 'cleanup') { clearCache(); return; }
-    if (msg.type === 'platform-init') {
-      // Always forward platformUrl — do NOT overwrite taskId/startDate
-      if (msg.platformUrl) post('/api/config', { platformUrl: msg.platformUrl });
-      return;
-    }
-    if (msg.type === 'get-labels-config') {
-      const config = await api('/api/labels-config').catch(() => null);
-      port.postMessage({ type: 'labels-config', config });
-      return;
-    }
-    if (msg.type === 'image-labels') {
-      await api('/api/image-labels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) }).catch(e => {
-        port.postMessage({ type: 'quicklabel-error', message: e.message || String(e) });
-      });
-      return;
-    }
-    if (msg.type === 'image-label-status') {
-      await api('/api/image-label-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) }).catch(e => {
-        port.postMessage({ type: 'quicklabel-error', message: e.message || String(e) });
-      });
-      return;
-    }
+    if (msg.type === 'platform-init') { if (msg.platformUrl) post('/api/config', { platformUrl: msg.platformUrl }); return; }
+    if (msg.type === 'get-labels-config') { const c = await api('/api/labels-config').catch(() => null); port.postMessage({ type: 'labels-config', config: c }); return; }
+    if (msg.type === 'image-labels') { await api('/api/image-labels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) }).catch(e => { port.postMessage({ type: 'quicklabel-error', message: e.message || String(e) }); }); return; }
+    if (msg.type === 'image-label-status') { await api('/api/image-label-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) }).catch(e => { port.postMessage({ type: 'quicklabel-error', message: e.message || String(e) }); }); return; }
     if (msg.type === 'cache-size') { groupSize = normalizeGroupSize(msg.cacheSize); storageSet({ cacheSize: groupSize }).catch(() => {}); port.postMessage({ type: 'cache-settings', cacheSize: groupSize }); return; }
-    if (msg.type === 'config') {
-      if (!configLoaded) await refreshConfig();
-      const token = String(msg.token || '').trim(), taskId = String(msg.taskId || '').trim(), startDate = String(msg.startDate || '').trim(), platformUrl = String(msg.platformUrl || '').trim();
-      if (!token) return;
-      const key = token + '|' + platformUrl + '|' + taskId + '|' + startDate;
-      if (key !== lastConfigKey) { lastConfigKey = key; post('/api/config', { token, taskId, startDate, cacheSize: groupSize, platformUrl }); }
-      return;
-    }
+    if (msg.type === 'config') { if (!configLoaded) await refreshConfig(); const t = String(msg.token || '').trim(), tid = String(msg.taskId || '').trim(), sd = String(msg.startDate || '').trim(), pu = String(msg.platformUrl || '').trim(); if (!t) return; const k = t + '|' + pu + '|' + tid + '|' + sd; if (k !== lastConfigKey) { lastConfigKey = k; post('/api/config', { token: t, taskId: tid, startDate: sd, cacheSize: groupSize, platformUrl: pu }); } return; }
+    if (msg.type === 'oss-verify-results' && msg.results && msg.results.length) { for (const r of msg.results) { await post('/api/verify-oss-result', { q: r.q, status: r.status }); } return; }
     post('/api/monitor', msg);
     if (msg.type === 'submission') { if (msg.question) ensureGroup(Number(msg.question) + 1); return; }
     if (msg.question) ensureGroup(Number(msg.question));
   });
-  port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); });
+
+  // OSS Verify — poll Go for pending tasks, forward to monitor port
+  let ossLastTaskId = '', ossSentIdx = 0;
+  const ossPoll = setInterval(async () => {
+    if (port.name !== 'monitor') return;
+    try {
+      const task = await api('/api/verify-oss').catch(() => null);
+      if (!task || task.total <= 0 || task.done >= task.total || task.preparing) return;
+      if (task.id !== ossLastTaskId) { ossLastTaskId = task.id; ossSentIdx = 0; }
+      if (task.items && Array.isArray(task.items) && ossSentIdx < task.items.length) {
+        const batch = task.items.slice(ossSentIdx, ossSentIdx + 5);
+        ossSentIdx += batch.length;
+        port.postMessage({ type: 'verify-oss-batch', items: batch });
+      }
+    } catch(e) {}
+  }, 2000);
+  port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); clearInterval(ossPoll); });
 });

@@ -109,6 +109,23 @@ var reverseWatermark = map[float64]string{
 	1: "带水印",
 }
 
+type ossVerifyItem struct {
+	Q       int    `json:"q"`
+	OSSURL  string `json:"ossUrl"`
+	PromptID string `json:"-"`
+}
+type ossVerifyTask struct {
+	ID      string          `json:"id"`
+	Items   []ossVerifyItem `json:"items"`
+	Results map[int]string  `json:"-"`
+	Done    int             `json:"done"`
+	Total   int             `json:"total"`
+	StartAt int64           `json:"startAt"`
+	mu      sync.Mutex
+}
+var ossTask *ossVerifyTask
+var ossTaskMu sync.Mutex
+
 func countFromPayload(payload map[string]interface{}) {
 	aminerLabelMu.Lock()
 	defer aminerLabelMu.Unlock()
@@ -1092,6 +1109,76 @@ func main() {
 		json.NewEncoder(w).Encode(snapshot)
 	})
 
+	// OSS Verify — prepares annotated items' OSS URLs for browser-side HEAD check
+	mux.HandleFunc("/api/verify-oss", func(w http.ResponseWriter, r *http.Request) {
+		if config.Token == "" || config.TaskID == "" || config.StartDate == "" {
+			http.Error(w, "not configured", 400); return
+		}
+		if r.Method == "POST" {
+			ossTaskMu.Lock(); ossTask = nil; ossTaskMu.Unlock()
+			t := &ossVerifyTask{ID: fmt.Sprintf("%d", time.Now().UnixMilli()), Results: map[int]string{}, StartAt: time.Now().UnixMilli(), Total: -1}
+			ossTaskMu.Lock(); ossTask = t; ossTaskMu.Unlock()
+			go func() {
+				seen := map[string]bool{}
+				for page := 1; page <= 5; page++ {
+					resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+						"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
+					if err != nil { break }
+					var data struct {
+						Prompts []struct{ PromptID string `json:"prompt_id"`; State int `json:"state"` } `json:"prompts"`
+						PageSize int `json:"page_size"`
+					}
+					body, _ := io.ReadAll(resp.Body); resp.Body.Close(); json.Unmarshal(body, &data)
+					qBase := (page-1)*data.PageSize + 1
+					for i, p := range data.Prompts {
+						if p.State != 1 || seen[p.PromptID] { continue }
+						seen[p.PromptID] = true; qn := qBase + i
+						qResp, err := doAMinerGet(annotBase() + "/api/v1/bench/questions/" + p.PromptID + "?uid=")
+						if err != nil { continue }
+						var qData struct { Responses []struct{ Reply string `json:"reply"` } `json:"responses"` }
+						qb, _ := io.ReadAll(qResp.Body); qResp.Body.Close(); json.Unmarshal(qb, &qData)
+						for _, rp := range qData.Responses {
+							u := extractOSSURL(rp.Reply)
+							if u != "" {
+								t.mu.Lock()
+								t.Items = append(t.Items, ossVerifyItem{Q: qn, OSSURL: u, PromptID: p.PromptID})
+								t.Results[qn] = "pending"; t.Total = len(t.Items)
+								t.mu.Unlock()
+								break
+							}
+						}
+					}
+					if len(data.Prompts) < data.PageSize { break }
+				}
+				log.Printf("[OSS-VERIFY] Task %s: %d items ready", t.ID, t.Total)
+			}()
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": t.ID, "total": 0, "items": nil, "preparing": true})
+			return
+		}
+		// GET: progress
+		ossTaskMu.Lock(); t := ossTask; ossTaskMu.Unlock()
+		if t == nil { w.Write([]byte(`{"total":0,"done":0,"finished":true}`)); return }
+		t.mu.Lock(); done, total := t.Done, t.Total; finished := done >= total && total > 0
+		preparing := total < 0
+		if total < 0 { total = 0 }
+		var failedQ []int
+		for q, s := range t.Results { if s == "fail" { failedQ = append(failedQ, q) } }
+		t.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": t.ID, "total": total, "done": done, "finished": finished, "failedQ": failedQ, "preparing": preparing, "items": t.Items})
+	})
+
+	mux.HandleFunc("/api/verify-oss-result", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Q int `json:"q"`; Status string `json:"status"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		ossTaskMu.Lock(); t := ossTask; ossTaskMu.Unlock()
+		if t == nil { w.Write([]byte(`{"ok":false}`)); return }
+		t.mu.Lock()
+		if t.Results[req.Q] == "pending" { t.Results[req.Q] = req.Status; t.Done++ }
+		t.mu.Unlock(); w.Write([]byte(`{"ok":true}`))
+	})
+
 	// Submit labels directly to AMiner API (bypass DOM/keyboard)
 	mux.HandleFunc("/api/submit", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -1287,6 +1374,16 @@ func syncAllAnnotations() {
 		page++
 	}
 	log.Printf("[SYNC] Done: %d pages, %d items synced", page-1, synced)
+}
+
+func extractOSSURL(reply string) string {
+	prefix := "![img]("
+	i := strings.Index(reply, prefix)
+	if i < 0 { return "" }
+	start := i + len(prefix)
+	j := strings.Index(reply[start:], ")")
+	if j < 0 { return "" }
+	return reply[start : start+j]
 }
 
 // getRespID calls bench/questions API and extracts the first response's id (resp_id)
