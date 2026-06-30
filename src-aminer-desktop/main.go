@@ -712,20 +712,10 @@ func main() {
 				}
 			}
 		}
-		// Per-label counts from local cache
-		labelMap := map[string]int{}
+		// Per-label counts from local cache — parse labels JSON per group
 		var failedQ []int
-		for _, img := range images {
-			if img.LabelText != "" {
-				labelMap[img.LabelText]++
-				if img.LabelStatus == "submit_failed" {
-					failedQ = append(failedQ, img.QuestionNum)
-				}
-			}
-		}
-		// Build label count list
-		var counts []labelCount
-		// Try to read labels-config to get group info
+		counts := []labelCount{}
+		// Read config first to know group structure
 		cfgPath := filepath.Join(dataDir, "labels-config.json")
 		cfgBody, _ := os.ReadFile(cfgPath)
 		if len(cfgBody) >= 3 && cfgBody[0] == 0xEF && cfgBody[1] == 0xBB && cfgBody[2] == 0xBF {
@@ -734,18 +724,74 @@ func main() {
 		if len(cfgBody) == 0 { cfgBody = defaultLabelsConfig }
 		var lCfg struct {
 			Groups []struct {
-				ID    string `json:"id"`
-				Name  string `json:"name"`
+				ID      string `json:"id"`
+				Name    string `json:"name"`
 				Options []struct {
 					Label string `json:"label"`
 				} `json:"options"`
 			} `json:"groups"`
 		}
-		if json.Unmarshal(cfgBody, &lCfg) == nil {
+		if json.Unmarshal(cfgBody, &lCfg) != nil {
+			lCfg.Groups = nil
+		}
+		// Count per label using stored labels JSON, not labelText
+		for _, img := range images {
+			if img.LabelText == "" && img.LabelStatus != "submit_failed" {
+				continue
+			}
+			if img.LabelStatus == "submit_failed" {
+				failedQ = append(failedQ, img.QuestionNum)
+			}
+			// Parse img.Labels (any → map[string][]string)
+			var parsed map[string][]string
+			switch v := img.Labels.(type) {
+			case map[string]interface{}:
+				parsed = make(map[string][]string)
+				for k, vals := range v {
+					if arr, ok := vals.([]interface{}); ok {
+						for _, item := range arr {
+							if s, ok := item.(string); ok {
+								parsed[k] = append(parsed[k], s)
+							}
+						}
+					}
+				}
+			case map[string][]string:
+				parsed = v
+			}
+			if parsed == nil {
+				continue
+			}
+			// Accumulate per-group per-label counts
 			for _, g := range lCfg.Groups {
-				for _, opt := range g.Options {
-					cnt := labelMap[opt.Label]
-					counts = append(counts, labelCount{GroupID: g.ID, Label: opt.Label, Count: cnt})
+				vals := parsed[g.ID]
+				for _, v := range vals {
+					found := false
+					for i := range counts {
+						if counts[i].GroupID == g.ID && counts[i].Label == v {
+							counts[i].Count++
+							found = true
+							break
+						}
+					}
+					if !found {
+						counts = append(counts, labelCount{GroupID: g.ID, Label: v, Count: 1})
+					}
+				}
+			}
+		}
+		// Ensure all configured labels exist in result (with 0 if unlabeled)
+		for _, g := range lCfg.Groups {
+			for _, opt := range g.Options {
+				found := false
+				for i := range counts {
+					if counts[i].GroupID == g.ID && counts[i].Label == opt.Label {
+						found = true
+						break
+					}
+				}
+				if !found {
+					counts = append(counts, labelCount{GroupID: g.ID, Label: opt.Label, Count: 0})
 				}
 			}
 		}
