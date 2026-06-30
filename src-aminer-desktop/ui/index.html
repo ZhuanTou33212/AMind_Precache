@@ -745,21 +745,27 @@ async function verifyAnnotated(){
   var panel=$('#statsPanel'),list=$('#statsAnnotatedQ'),summary=$('#statsSummary');
   if(!panel)return;
   panel.style.display='block';
-  summary.textContent='验证中... HEAD请求已标注图片OSS';
-  list.innerHTML='<span style="color:#888">正在逐条验证图片可用性...</span>';
+  summary.textContent='验证中... 检测bench/questions数据完整性';
+  list.innerHTML='<span style="color:#888">正在逐条验证...</span>';
   try{
     var v=await api('/api/verify');
-    summary.textContent='总计: '+v.totalAnnotated+' | OK: '+v.ok+' | 失效: '+v.failed;
+    summary.textContent='已标注: '+v.totalAnnotated+' | 检查: '+v.checked+' | 正常: '+v.ok+' | 警告: '+v.warn+' | 异常: '+v.failed;
     var html='';
-    if(v.ok)html+='<span style="color:#7dd3c7">已检测 '+v.checked+' 张, 正常 '+v.ok+' 张</span><br>';
-    if(v.failedQuestions&&v.failedQuestions.length){
-      html+='<span style="color:#d94848">失效题号 ('+v.failedQuestions.length+'):</span> ';
-      html+=v.failedQuestions.map(function(q){return 'Q'+q}).join(' ');
-    }else if(v.failed===0){
-      html+='<span style="color:#7dd3c7">全部正常</span>';
+    if(v.items&&v.items.length){
+      for(var i=0;i<v.items.length;i++){
+        var it=v.items[i];
+        var c=it.status==='ok'?'#7dd3c7':it.status==='warn'?'#e5a97d':'#d94848';
+        html+='<div style="margin:4px 0;border-left:3px solid '+c+';padding-left:6px;font-size:11px">';
+        html+='<b>Q'+it.q+'</b> ';
+        if(it.hasImage)html+='<span style="color:#7dd3c7">[图片✓]</span> '; else html+='<span style="color:#d94848">[图片✗]</span> ';
+        html+='<span>label_state='+(it.labelState!=null?JSON.stringify(it.labelState):'<span style="color:#888">null</span>')+'</span> ';
+        html+='<span>label_result='+(it.labelResult!=null?JSON.stringify(it.labelResult):'<span style="color:#888">null</span>')+'</span> ';
+        if(it.itemPayload)html+='<span style="color:#888">payload='+JSON.stringify(it.itemPayload)+'</span> ';
+        if(it.note)html+='<span style="color:'+c+'">['+it.note+']</span>';
+        html+='</div>';
+      }
     }
-    if(v.errors&&v.errors.length)html+='<br><span style="color:#e5a97d">'+v.errors.join('<br>')+'</span>';
-    list.innerHTML=html;
+    list.innerHTML=html||'<span style="color:#666">暂无数据</span>';
   }catch(e){summary.textContent='验证失败: '+e.message;list.innerHTML='<span style="color:#d94848">'+e.message+'</span>'}
 }
 
