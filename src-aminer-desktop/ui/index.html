@@ -220,6 +220,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
         <span id="statsSummary" style="font-size:12px;color:#7dd3c7"></span>
       </div>
       <div class="slot-actions">
+        <button class="btn" onclick="syncAnnotations()">全量同步</button>
         <button class="btn" onclick="queryStats()">刷新统计</button>
         <button class="btn" style="background:#14b8a6;color:#fff" onclick="verifyAnnotated()">验证已标注图片</button>
         <button class="btn" onclick="$('#statsPanel').style.display='none'" style="font-size:11px">关闭</button>
@@ -739,6 +740,27 @@ async function requestDirectAPISubmit(all){
   }
   await refreshImages({sync:false});
   toast('直接提交完成: OK='+ok+' 失败='+fail);
+}
+
+async function syncAnnotations(){
+  var panel=$('#statsPanel'),list=$('#statsAnnotatedQ'),summary=$('#statsSummary');
+  panel.style.display='block';
+  summary.textContent='全量同步中...';
+  list.innerHTML='<span style="color:#888">正在扫描所有页面，请稍候...</span>';
+  try{
+    var s=await api('/api/sync-annotations',{method:'POST'});
+    summary.textContent='总数:'+s.total+' | 已标注:'+s.annotated+' | 本地缓存已建立';
+    var html='<div style="margin:6px 0;padding:8px;background:#0a0f1a;border-radius:4px">';
+    html+='全量同步完成: '+s.synced+' 条记录已缓存<br>';
+    html+='标注进度: '+s.annotated+'/'+s.total+' ('+(s.total?(s.annotated/s.total*100).toFixed(1):0)+'%)<br>';
+    if(s.labelCounts&&s.labelCounts.length){
+      html+='<div style="margin-top:6px">';
+      for(var i=0;i<s.labelCounts.length;i++)html+=s.labelCounts[i].label+' <b>'+s.labelCounts[i].count+'</b> &nbsp;';
+      html+='</div>';
+    }
+    html+='</div>';
+    list.innerHTML=html;
+  }catch(e){summary.textContent='同步失败: '+e.message;list.innerHTML=e.message}
 }
 
 async function verifyAnnotated(){

@@ -508,9 +508,57 @@ func main() {
 			for _, img := range st.ListImages() {
 				st.DeleteImage(img.Hash)
 			}
+			st.ClearAnnotations()
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(st.ListImages())
+	})
+
+	// Sync annotations — full scan of all prompts pages, store locally (state only)
+	// Runs in background; returns immediately with current stats
+	mux.HandleFunc("/api/sync-annotations", func(w http.ResponseWriter, r *http.Request) {
+		if config.Token == "" || config.TaskID == "" || config.StartDate == "" {
+			http.Error(w, "not configured", 400)
+			return
+		}
+		if r.Method == "POST" {
+			go syncAllAnnotations()
+		}
+		total, annotated := st.CountAnnotations()
+		aminerLabelMu.Lock()
+		labelSums := make(map[string]int)
+		for k, v := range aminerLabelCounts { labelSums[k] = v }
+		aminerLabelMu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total": total, "annotated": annotated, "labelCounts": labelSums,
+		})
+	})
+
+	// Cached annotations — read from local cache
+	mux.HandleFunc("/api/cached-annotations", func(w http.ResponseWriter, r *http.Request) {
+		cached := st.ListAnnotations()
+		total, annotated := st.CountAnnotations()
+		var emptyQ, annotatedQ []int
+		for _, a := range cached {
+			if a.State == 1 {
+				annotatedQ = append(annotatedQ, a.QuestionNum)
+				if a.LabelLevel == 0 && a.LabelWatermark == 0 {
+					emptyQ = append(emptyQ, a.QuestionNum)
+				}
+			}
+		}
+		aminerLabelMu.Lock()
+		labelSums := make(map[string]int)
+		for k, v := range aminerLabelCounts { labelSums[k] = v }
+		aminerLabelMu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total":       total,
+			"annotated":   annotated,
+			"emptyQ":      emptyQ,
+			"labelCounts": labelSums,
+		})
 	})
 
 	mux.HandleFunc("/api/image/", func(w http.ResponseWriter, r *http.Request) {
@@ -1206,6 +1254,39 @@ func genUUID() string {
 func mustAtoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+func syncAllAnnotations() {
+	if config.Token == "" || config.TaskID == "" || config.StartDate == "" { return }
+	log.Printf("[SYNC] Starting full annotation sync...")
+	page := 1
+	synced := 0
+	for {
+		resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
+		if err != nil { break }
+		var data struct {
+			Prompts []struct{
+				ID       int    `json:"id"`
+				PromptID string `json:"prompt_id"`
+				State    int    `json:"state"`
+			} `json:"prompts"`
+			PageSize int `json:"page_size"`
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if json.Unmarshal(body, &data) != nil { break }
+		qBase := (page-1)*data.PageSize + 1
+		for i, p := range data.Prompts {
+			st.UpsertAnnotation(store.AnnotationSlot{
+				QuestionNum: qBase + i, PromptID: p.PromptID, AssignmentID: p.ID, State: p.State,
+			})
+			synced++
+		}
+		if len(data.Prompts) < data.PageSize { break }
+		page++
+	}
+	log.Printf("[SYNC] Done: %d pages, %d items synced", page-1, synced)
 }
 
 // getRespID calls bench/questions API and extracts the first response's id (resp_id)

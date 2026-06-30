@@ -81,6 +81,20 @@ func New(dataDir string, maxKeep int) (*Store, error) {
 		}
 	}
 
+	// Annotation state cache — local mirror of AMiner prompts API
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS annotation_cache (
+		question_num INTEGER PRIMARY KEY,
+		prompt_id TEXT,
+		assignment_id INTEGER,
+		state INTEGER DEFAULT 0,
+		label_level REAL DEFAULT 0,
+		label_watermark REAL DEFAULT 0,
+		cached_at INTEGER DEFAULT 0
+	)`)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Store{db: db, dataDir: dataDir, maxKeep: maxKeep}, nil
 }
 
@@ -338,6 +352,49 @@ func normalizeLabels(labels []byte) []byte {
 		return []byte("{}")
 	}
 	return out
+}
+
+// ---- Annotation cache operations ----
+
+type AnnotationSlot struct {
+	QuestionNum   int     `json:"q"`
+	PromptID      string  `json:"promptId"`
+	AssignmentID  int     `json:"assignmentId"`
+	State         int     `json:"state"`
+	LabelLevel    float64 `json:"level"`
+	LabelWatermark float64 `json:"watermark"`
+}
+
+func (s *Store) UpsertAnnotation(a AnnotationSlot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO annotation_cache(question_num,prompt_id,assignment_id,state,label_level,label_watermark,cached_at)
+		VALUES(?,?,?,?,?,?,?)`,
+		a.QuestionNum, a.PromptID, a.AssignmentID, a.State, a.LabelLevel, a.LabelWatermark, time.Now().UnixMilli())
+	return err
+}
+
+func (s *Store) ListAnnotations() []AnnotationSlot {
+	rows, _ := s.db.Query(`SELECT question_num,prompt_id,assignment_id,state,label_level,label_watermark FROM annotation_cache ORDER BY question_num`)
+	defer rows.Close()
+	var result []AnnotationSlot
+	for rows.Next() {
+		var a AnnotationSlot
+		rows.Scan(&a.QuestionNum, &a.PromptID, &a.AssignmentID, &a.State, &a.LabelLevel, &a.LabelWatermark)
+		result = append(result, a)
+	}
+	return result
+}
+
+func (s *Store) CountAnnotations() (total, annotated int) {
+	s.db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state=1 THEN 1 ELSE 0 END) FROM annotation_cache`).Scan(&total, &annotated)
+	return
+}
+
+func (s *Store) ClearAnnotations() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.db.Exec(`DELETE FROM annotation_cache`)
 }
 
 func parseLabels(text string) (any, string) {
