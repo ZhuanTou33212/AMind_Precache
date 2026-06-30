@@ -819,40 +819,52 @@ func main() {
 		})
 	})
 
-	// Verify — check annotated items' bench/questions responses, return full data
+	// Verify — check annotated items data integrity + return per-label counts
 	mux.HandleFunc("/api/verify", func(w http.ResponseWriter, r *http.Request) {
 		if config.Token == "" || config.TaskID == "" || config.StartDate == "" {
 			http.Error(w, "not configured", 400)
 			return
 		}
-		type itemDetail struct {
-			QuestionNum int                    `json:"q"`
-			PromptID    string                 `json:"promptId"`
-			HasImage    bool                   `json:"hasImage"`
-			LabelState  interface{}            `json:"labelState"`
-			LabelResult interface{}            `json:"labelResult"`
-			Payload     map[string]interface{} `json:"itemPayload,omitempty"`
-			Status      string                 `json:"status"` // "ok", "warn", "fail"
-			Note        string                 `json:"note,omitempty"`
+		type labelStat struct {
+			GroupID string `json:"groupId"`
+			Label   string `json:"label"`
+			Count   int    `json:"count"`
 		}
 		type verifyResult struct {
-			Checked    int          `json:"checked"`
-			OK         int          `json:"ok"`
-			Warn       int          `json:"warn"`
-			Failed     int          `json:"failed"`
-			TotalAnnot int          `json:"totalAnnotated"`
-			Items      []itemDetail `json:"items"`
-			Errors     []string     `json:"errors,omitempty"`
+			TotalAnnot  int         `json:"totalAnnotated"`
+			Checked     int         `json:"checked"`
+			OK          int         `json:"ok"`
+			Failed      int         `json:"failed"`
+			FailedQ     []int       `json:"failedQ,omitempty"`
+			LabelCounts []labelStat `json:"labelCounts"`
+			LocalLabeled int        `json:"localLabeled"`
 		}
 		result := verifyResult{}
-		var annotated []struct{ PromptID string; QuestionNum int }
-		for page := 1; page <= 3; page++ {
+
+		// Get AMiner annotated count from indicator
+		startResp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			"/date/" + config.StartDate + "/v2?page=1")
+		if err == nil {
+			var indicator struct {
+				Indicator struct{ AnnotCnt int `json:"annot_cnt"` } `json:"indicator"`
+			}
+			ibody, _ := io.ReadAll(startResp.Body)
+			startResp.Body.Close()
+			json.Unmarshal(ibody, &indicator)
+			result.TotalAnnot = indicator.Indicator.AnnotCnt
+		}
+
+		// Spot-check first few annotated items for data integrity
+		for page := 1; page <= 2; page++ {
 			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 			resp, err := doAMinerGet(url)
 			if err != nil { break }
 			var data struct {
-				Prompts []struct{ PromptID string `json:"prompt_id"`; State int `json:"state"` } `json:"prompts"`
+				Prompts []struct{
+					PromptID string `json:"prompt_id"`
+					State    int    `json:"state"`
+				} `json:"prompts"`
 				PageSize int `json:"page_size"`
 			}
 			body, _ := io.ReadAll(resp.Body)
@@ -860,68 +872,69 @@ func main() {
 			json.Unmarshal(body, &data)
 			qBase := (page-1)*data.PageSize + 1
 			for i, p := range data.Prompts {
-				if p.State == 1 {
-					annotated = append(annotated, struct{ PromptID string; QuestionNum int }{p.PromptID, qBase + i})
+				if p.State == 1 && result.Checked < 20 {
+					result.Checked++
+					qURL := annotBase() + "/api/v1/bench/questions/" + p.PromptID + "?uid="
+					qResp, err := doAMinerGet(qURL)
+					if err != nil {
+						result.Failed++
+						result.FailedQ = append(result.FailedQ, qBase+i)
+						continue
+					}
+					var qData struct {
+						Responses []struct{ Reply string `json:"reply"` } `json:"responses"`
+					}
+					rb, _ := io.ReadAll(qResp.Body)
+					qResp.Body.Close()
+					json.Unmarshal(rb, &qData)
+					if len(qData.Responses) > 0 && qData.Responses[0].Reply != "" && strings.Contains(qData.Responses[0].Reply, "oss-cn-") {
+						result.OK++
+					} else {
+						result.Failed++
+						result.FailedQ = append(result.FailedQ, qBase+i)
+					}
 				}
 			}
 			if len(data.Prompts) < data.PageSize { break }
 		}
-		result.TotalAnnot = len(annotated)
-		maxCheck := 10
-		for idx, a := range annotated {
-			if idx >= maxCheck { break }
-			item := itemDetail{QuestionNum: a.QuestionNum, PromptID: a.PromptID}
-			qURL := annotBase() + "/api/v1/bench/questions/" + a.PromptID + "?uid="
-			qResp, err := doAMinerGet(qURL)
-			result.Checked++
-			if err != nil {
-				item.Status = "fail"
-				item.Note = err.Error()
-				result.Items = append(result.Items, item)
-				result.Failed++
-				continue
-			}
-			qBody, _ := io.ReadAll(qResp.Body)
-			qResp.Body.Close()
-			var qData struct {
-				Payload   map[string]interface{} `json:"payload"`
-				Responses []struct {
-					ID          string      `json:"id"`
-					Reply       string      `json:"reply"`
-					LabelState  interface{} `json:"label_state"`
-					LabelResult interface{} `json:"label_result"`
-				} `json:"responses"`
-			}
-			if json.Unmarshal(qBody, &qData) == nil {
-				item.Payload = qData.Payload
-				if len(qData.Responses) > 0 {
-					r0 := qData.Responses[0]
-					item.LabelState = r0.LabelState
-					item.LabelResult = r0.LabelResult
-					item.HasImage = r0.Reply != "" && strings.Contains(r0.Reply, "oss-cn-")
-					if item.HasImage && r0.LabelState != nil {
-						item.Status = "ok"
-						result.OK++
-					} else if item.HasImage {
-						item.Status = "warn"
-						item.Note = "有图片但label_state为空"
-						result.Warn++
-					} else {
-						item.Status = "fail"
-						item.Note = "无有效图片URL"
-						result.Failed++
+
+		// Per-label counts from local SQLite
+		images := st.ListImages()
+		countMap := map[string]int{}
+		cfgPath := filepath.Join(dataDir, "labels-config.json")
+		cfgBody, _ := os.ReadFile(cfgPath)
+		if len(cfgBody) >= 3 && cfgBody[0] == 0xEF && cfgBody[1] == 0xBB && cfgBody[2] == 0xBF { cfgBody = cfgBody[3:] }
+		if len(cfgBody) == 0 { cfgBody = defaultLabelsConfig }
+		var lCfg struct {
+			Groups []struct {
+				ID      string `json:"id"`
+				Options []struct{ Label string `json:"label"` } `json:"options"`
+			} `json:"groups"`
+		}
+		json.Unmarshal(cfgBody, &lCfg)
+		for _, img := range images {
+			if img.LabelText == "" { continue }
+			switch raw := img.Labels.(type) {
+			case map[string]interface{}:
+				for _, vals := range raw {
+					if arr, ok := vals.([]interface{}); ok {
+						for _, item := range arr {
+							if s, ok := item.(string); ok { countMap[s]++ }
+						}
 					}
-				} else {
-					item.Status = "fail"
-					item.Note = "responses数组为空"
-					result.Failed++
 				}
-			} else {
-				item.Status = "fail"
-				item.Note = "bench/questions响应解析失败"
-				result.Failed++
+			case map[string][]string:
+				for _, vals := range raw {
+					for _, s := range vals { countMap[s]++ }
+				}
 			}
-			result.Items = append(result.Items, item)
+			result.LocalLabeled++
+		}
+		for _, g := range lCfg.Groups {
+			for _, opt := range g.Options {
+				c := countMap[opt.Label]
+				result.LabelCounts = append(result.LabelCounts, labelStat{GroupID: g.ID, Label: opt.Label, Count: c})
+			}
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(result)
