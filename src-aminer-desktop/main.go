@@ -677,38 +677,51 @@ func main() {
 				"/date/" + config.StartDate + "/v2?page=1")
 			if err == nil {
 				var indicator struct {
-					Indicator struct{ TotalCnt int `json:"total_cnt"` } `json:"indicator"`
+					Indicator struct{
+						TotalCnt int `json:"total_cnt"`
+						AnnotCnt int `json:"annot_cnt"`
+					} `json:"indicator"`
 				}
 				ibody, _ := io.ReadAll(startResp.Body)
 				startResp.Body.Close()
 				json.Unmarshal(ibody, &indicator)
 				amTotal = indicator.Indicator.TotalCnt
-				// Scan first 3 pages for annotated count & suspicious
-				for page := 1; page <= 3; page++ {
-					url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
-						"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
-					resp, err := doAMinerGet(url)
-					if err != nil { break }
-					var data struct {
-						Prompts []struct{
-							PromptID string `json:"prompt_id"`
-							State    int    `json:"state"`
-						} `json:"prompts"`
-						PageSize int `json:"page_size"`
-					}
-					body, _ := io.ReadAll(resp.Body)
-					resp.Body.Close()
-					if json.Unmarshal(body, &data) != nil { break }
-					qBase := (page-1)*data.PageSize + 1
-					for i, p := range data.Prompts {
-						if p.State == 1 {
-							amAnnotated++
-							if p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-") {
-								amSuspicious = append(amSuspicious, qBase+i)
-							}
+				amAnnotated = indicator.Indicator.AnnotCnt
+				// Scan annotated pages for suspicious items (invalid prompt_id)
+				if annotMaxPage, ok := 0, false; true {
+					amBody := make(map[string]interface{})
+					json.Unmarshal(ibody, &amBody)
+					if ind, ok2 := amBody["indicator"].(map[string]interface{}); ok2 {
+						if amp, ok3 := ind["annot_max_page"].(float64); ok3 {
+							annotMaxPage = int(amp)
+							ok = true
 						}
 					}
-					if len(data.Prompts) < data.PageSize { break }
+					if ok && annotMaxPage > 0 {
+						for page := 1; page <= annotMaxPage && page <= 5; page++ {
+							url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+								"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
+							resp, err := doAMinerGet(url)
+							if err != nil { break }
+							var data struct {
+								Prompts []struct{
+									PromptID string `json:"prompt_id"`
+									State    int    `json:"state"`
+								} `json:"prompts"`
+								PageSize int `json:"page_size"`
+							}
+							body, _ := io.ReadAll(resp.Body)
+							resp.Body.Close()
+							if json.Unmarshal(body, &data) != nil { break }
+							qBase := (page-1)*data.PageSize + 1
+							for i, p := range data.Prompts {
+								if p.State == 1 && (p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-")) {
+									amSuspicious = append(amSuspicious, qBase+i)
+								}
+							}
+							if len(data.Prompts) < data.PageSize { break }
+						}
+					}
 				}
 			}
 		}
