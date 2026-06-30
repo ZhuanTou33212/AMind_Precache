@@ -91,6 +91,22 @@ type monState struct {
 
 var respCache = map[string]string{} // prompt_id → resp_id (learned from web submissions)
 var respCacheMu sync.Mutex
+
+// debugLog records failed transfers and suspicious annotations
+var debugLog = []map[string]interface{}{}
+var debugMu sync.Mutex
+
+func addDebugEntry(tag string, data map[string]interface{}) {
+	debugMu.Lock()
+	defer debugMu.Unlock()
+	data["tag"] = tag
+	data["time"] = time.Now().UnixMilli()
+	debugLog = append(debugLog, data)
+	if len(debugLog) > 500 {
+		debugLog = debugLog[len(debugLog)-300:]
+	}
+}
+
 var mon = &monState{}
 var monPage = 0 // which page to poll for annotation changes
 var monRunning = false
@@ -562,6 +578,80 @@ func main() {
 		w.Write([]byte(`{"ok":true}`))
 	})
 
+	// Stats — poll AMiner prompts API and return annotation statistics
+	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
+		if config.Token == "" || config.TaskID == "" || config.StartDate == "" {
+			http.Error(w, "not configured", 400)
+			return
+		}
+		type statResult struct {
+			Total     int      `json:"total"`
+			Annotated int      `json:"annotated"`
+			Pending   int      `json:"pending"`
+			Suspicious []int   `json:"suspicious"` // state=1 but empty Prompt
+			Errors    []string `json:"errors,omitempty"`
+		}
+		result := statResult{}
+		page := 1
+		for {
+			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
+			resp, err := doAMinerGet(url)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("page %d: %v", page, err))
+				break
+			}
+			var data struct {
+				Prompts   []struct {
+					ID       int    `json:"id"`
+					PromptID string `json:"prompt_id"`
+					State    int    `json:"state"`
+					Prompt   string `json:"Prompt"`
+				} `json:"prompts"`
+				TotalPage int `json:"total_page"`
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if json.Unmarshal(body, &data) != nil {
+				break
+			}
+			result.Total += len(data.Prompts)
+			for _, p := range data.Prompts {
+				if p.State == 1 {
+					result.Annotated++
+					if p.Prompt == "" || p.Prompt == " " {
+						result.Suspicious = append(result.Suspicious, p.ID)
+					}
+				} else {
+					result.Pending++
+				}
+			}
+			if page >= data.TotalPage || len(data.Prompts) < 20 {
+				break
+			}
+			page++
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(result)
+	})
+
+	// Debug log — returns failed transfers and suspicious items
+	mux.HandleFunc("/api/debug-log", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			debugMu.Lock()
+			debugLog = debugLog[:0]
+			debugMu.Unlock()
+			w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		debugMu.Lock()
+		snapshot := make([]map[string]interface{}, len(debugLog))
+		copy(snapshot, debugLog)
+		debugMu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(snapshot)
+	})
+
 	// Submit labels directly to AMiner API (bypass DOM/keyboard)
 	mux.HandleFunc("/api/submit", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -635,6 +725,7 @@ func main() {
 		resp, err := doAMinerPost(annotBase()+"/api/v1/annotations/annot/responses", bodyJSON)
 		if err != nil {
 			st.UpdateLabelStatus(req.Hash, "", 0, "submit_failed", err.Error())
+			addDebugEntry("submit_error", map[string]interface{}{"hash": req.Hash, "promptId": record.PromptID, "questionNum": record.QuestionNum, "error": err.Error()})
 			http.Error(w, "submit failed: "+err.Error(), 500)
 			return
 		}
@@ -648,6 +739,10 @@ func main() {
 			w.Write([]byte(`{"ok":true,"status":"cloud_submitted"}`))
 		} else {
 			st.UpdateLabelStatus(req.Hash, "", 0, "submit_failed", string(respBody))
+			addDebugEntry("submit_failed", map[string]interface{}{
+				"hash": req.Hash, "promptId": record.PromptID, "questionNum": record.QuestionNum,
+				"httpStatus": resp.StatusCode, "responseBody": string(respBody),
+			})
 			log.Printf("[SUBMIT] Failed status=%d body=%s", resp.StatusCode, string(respBody))
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"ok":false,"status":"submit_failed","httpStatus":%d,"body":%q}`, resp.StatusCode, string(respBody))

@@ -144,7 +144,9 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 </div>
 
 <div class="panel" id="cacheSlotPanel">
-  <h2>图片缓存槽 <span id="slotStats" class="stats"></span></h2>
+  <h2>图片缓存槽 <span id="slotStats" class="stats"></span>
+    <button class="btn" style="margin-left:12px;background:#6366f1;color:#fff" onclick="queryStats()">查询统计</button>
+  </h2>
   <div class="slot-layout">
     <div class="slot-panel" id="unlabeledSlot">
       <div class="slot-head">
@@ -193,6 +195,23 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
         <div class="progress" style="margin-top:3px"><div id="queueProgressBar" style="width:0%;transition:width .3s"></div></div>
       </div>
       <div class="mini-grid" id="completedGrid"></div>
+    </div>
+  </div>
+
+  <div class="slot-layout" style="margin-top:8px">
+    <div class="slot-panel" id="debugPanel" style="border-color:#6366f1">
+      <div class="slot-head">
+        <h3>Debug 面板</h3>
+        <span class="slot-hint">提交失败 & 异常标注记录</span>
+      </div>
+      <div class="slot-actions">
+        <button class="btn" onclick="refreshDebugLog()">刷新日志</button>
+        <button class="btn danger" onclick="clearDebugLog()">清空日志</button>
+        <span id="debugStats" style="font-size:11px;color:#888"></span>
+      </div>
+      <div id="debugEntries" style="max-height:240px;overflow-y:auto;font:11px 'Courier New',monospace;background:#0a0f1a;border-radius:4px;padding:8px;color:#7dd3c7">
+        <span style="color:#666">点击刷新加载日志...</span>
+      </div>
     </div>
   </div>
 </div>
@@ -705,6 +724,55 @@ async function requestDirectAPISubmit(all){
   await refreshImages({sync:false});
   toast('直接提交完成: OK='+ok+' 失败='+fail);
 }
+
+async function queryStats(){
+  toast('正在查询标注统计...');
+  try{
+    var s=await api('/api/stats');
+    if(s.errors&&s.errors.length)toast('部分页面获取失败','#e5a97d');
+    if(s.total===0)return toast('无数据，请确认配置正确','#d94848');
+    var pct=s.total?(s.annotated/s.total*100).toFixed(1):0;
+    var msg=['总量: '+s.total,'已标注: '+s.annotated+' ('+pct+'%)','待标注: '+s.pending];
+    if(s.suspicious&&s.suspicious.length){
+      msg.push('异常: '+s.suspicious.length+' 个已标注但 Prompt 为空');
+      toast('异常: '+s.suspicious.join(', '),'#e5a97d');
+    }
+    toast(msg.join(' | '));
+    if(s.suspicious&&s.suspicious.length)console.warn('Suspicious annotation IDs (state=1 but empty Prompt):',s.suspicious);
+  }catch(e){toast('查询失败: '+e.message,'#d94848')}
+}
+
+async function refreshDebugLog(){
+  try{
+    var entries=await api('/api/debug-log');
+    var el=$('#debugEntries');var stat=$('#debugStats');
+    if(!el)return;
+    if(!entries||!entries.length){el.innerHTML='<span style="color:#666">暂无失败记录</span>';stat.textContent='0 条';return}
+    stat.textContent=entries.length+' 条';
+    var html='';
+    for(var i=entries.length-1;i>=0;i--){
+      var e=entries[i];
+      var ts=new Date(e.time).toLocaleTimeString();
+      var tagColor=e.tag==='submit_failed'?'#e5a97d':'#7dd3c7';
+      html+='<div style="margin-bottom:4px;border-left:2px solid '+tagColor+';padding-left:6px">';
+      html+='<span style="color:#888">['+ts+']</span> ';
+      html+='<span style="color:'+tagColor+'">'+e.tag+'</span> ';
+      if(e.questionNum)html+='Q'+e.questionNum+' ';
+      if(e.httpStatus)html+='<b>HTTP '+e.httpStatus+'</b> ';
+      if(e.error)html+=' <span style="color:#d94848">'+e.error+'</span>';
+      if(e.responseBody&&e.responseBody.length<100)html+=' <span style="color:#666">'+e.responseBody+'</span>';
+      html+='</div>';
+    }
+    el.innerHTML=html;
+  }catch(e){toast('刷新日志失败','#d94848')}
+}
+
+async function clearDebugLog(){
+  try{await api('/api/debug-log',{method:'DELETE'});refreshDebugLog();toast('日志已清空')}catch(e){toast('清空失败','#d94848')}
+}
+
+// Auto-refresh debug log every 5 seconds
+setInterval(function(){if(document.getElementById('debugPanel')&&document.getElementById('debugPanel').offsetParent)refreshDebugLog()},5000);
 
 function showLayerInPreview(slot){
   switchPreviewSlot(slot);
