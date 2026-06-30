@@ -761,7 +761,7 @@ async function verifyAnnotated(){
       html+='<div style="margin:6px 0;padding:8px;background:#0a0f1a;border-radius:4px">';
       html+='<div>'+q.join(' &nbsp; ')+'</div>';
       if(w.length)html+='<div style="margin-top:3px">'+w.join(' &nbsp; ')+'</div>';
-      html+='<div style="margin-top:4px;font-size:10px;color:#888">本地已标注: '+v.localLabeled+' 张</div>';
+      html+='<div style="margin-top:4px;font-size:10px;color:#888">本地: '+v.localLabeled+' 张 | AMiner捕获: '+v.aminerCaptured+' 次</div>';
       html+='</div>';
     }
     // Failed Q

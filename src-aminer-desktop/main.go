@@ -92,6 +92,38 @@ type monState struct {
 var respCache = map[string]string{} // prompt_id → resp_id (learned from web submissions)
 var respCacheMu sync.Mutex
 
+// aminerLabelCounts tracks per-label counts from captured web submissions
+var aminerLabelCounts = map[string]int{}
+var aminerLabelMu sync.Mutex
+
+// reverseLabelValue maps payload float64 value → label name
+var reverseLabelValue = map[float64]map[string]string{
+	1:  {"level": "惊艳"},
+	0.5: {"level": "好看"},
+	2:  {"level": "还不错"},
+	0:  {"level": "一般"},
+	-1: {"level": "不堪"},
+	-2: {"level": "带边框"},
+}
+var reverseWatermark = map[float64]string{
+	1: "带水印",
+}
+
+func countFromPayload(payload map[string]interface{}) {
+	aminerLabelMu.Lock()
+	defer aminerLabelMu.Unlock()
+	if level, ok := payload["level"].(float64); ok {
+		if m, ok2 := reverseLabelValue[level]; ok2 {
+			aminerLabelCounts[m["level"]]++
+		}
+	}
+	if wm, ok := payload["watermark"].(float64); ok {
+		if label, ok2 := reverseWatermark[wm]; ok2 {
+			aminerLabelCounts[label]++
+		}
+	}
+}
+
 // debugLog records failed transfers and suspicious annotations
 var debugLog = []map[string]interface{}{}
 var debugMu sync.Mutex
@@ -508,14 +540,21 @@ func main() {
 					var sub struct {
 						PromptID string `json:"prompt_id"`
 						Responses []struct {
-							RespID string `json:"resp_id"`
+							RespID  string                 `json:"resp_id"`
+							Payload map[string]interface{} `json:"payload"`
 						} `json:"responses"`
 					}
-					if json.Unmarshal([]byte(rb), &sub) == nil && sub.PromptID != "" && len(sub.Responses) > 0 && sub.Responses[0].RespID != "" {
-						respCacheMu.Lock()
-						respCache[sub.PromptID] = sub.Responses[0].RespID
-						respCacheMu.Unlock()
-						log.Printf("[SUBMIT] Cached real resp_id %s for prompt %s", sub.Responses[0].RespID, sub.PromptID)
+					if json.Unmarshal([]byte(rb), &sub) == nil && sub.PromptID != "" && len(sub.Responses) > 0 {
+						if sub.Responses[0].RespID != "" {
+							respCacheMu.Lock()
+							respCache[sub.PromptID] = sub.Responses[0].RespID
+							respCacheMu.Unlock()
+							log.Printf("[SUBMIT] Cached real resp_id %s for prompt %s", sub.Responses[0].RespID, sub.PromptID)
+						}
+						// Count per-label from payload values
+						if sub.Responses[0].Payload != nil {
+							countFromPayload(sub.Responses[0].Payload)
+						}
 					}
 				}
 				// Auto-extract tagger_id from first captured submission
@@ -808,14 +847,40 @@ func main() {
 				}
 			}
 		}
+		// Merge AMiner captured submission counts
+		aminerLabelMu.Lock()
+		aminerTotal := 0
+		for label, c := range aminerLabelCounts {
+			aminerTotal += c
+			found := false
+			for i := range counts {
+				if counts[i].Label == label {
+					counts[i].Count += c
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Find group ID for this label
+				gID := ""
+				for _, g := range lCfg.Groups {
+					for _, opt := range g.Options {
+						if opt.Label == label { gID = g.ID; break }
+					}
+				}
+				counts = append(counts, labelCount{GroupID: gID, Label: label, Count: c})
+			}
+		}
+		aminerLabelMu.Unlock()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"labels":        counts,
-			"groups":        lCfg.Groups,
-			"amTotal":       amTotal,
-			"amAnnotated":   amAnnotated,
-			"amSuspicious":  amSuspicious,
-			"failedQ":       failedQ,
+			"labels":          counts,
+			"groups":          lCfg.Groups,
+			"amTotal":         amTotal,
+			"amAnnotated":     amAnnotated,
+			"amSuspicious":    amSuspicious,
+			"failedQ":         failedQ,
+			"aminerCaptured":  aminerTotal,
 		})
 	})
 
@@ -831,13 +896,14 @@ func main() {
 			Count   int    `json:"count"`
 		}
 		type verifyResult struct {
-			TotalAnnot  int         `json:"totalAnnotated"`
-			Checked     int         `json:"checked"`
-			OK          int         `json:"ok"`
-			Failed      int         `json:"failed"`
-			FailedQ     []int       `json:"failedQ,omitempty"`
-			LabelCounts []labelStat `json:"labelCounts"`
-			LocalLabeled int        `json:"localLabeled"`
+			TotalAnnot   int         `json:"totalAnnotated"`
+			Checked      int         `json:"checked"`
+			OK           int         `json:"ok"`
+			Failed       int         `json:"failed"`
+			FailedQ      []int       `json:"failedQ,omitempty"`
+			LabelCounts  []labelStat `json:"labelCounts"`
+			LocalLabeled int         `json:"localLabeled"`
+			AminerCounts int         `json:"aminerCaptured"`
 		}
 		result := verifyResult{}
 
@@ -933,9 +999,17 @@ func main() {
 		for _, g := range lCfg.Groups {
 			for _, opt := range g.Options {
 				c := countMap[opt.Label]
+				aminerLabelMu.Lock()
+				c += aminerLabelCounts[opt.Label]
+				aminerLabelMu.Unlock()
 				result.LabelCounts = append(result.LabelCounts, labelStat{GroupID: g.ID, Label: opt.Label, Count: c})
 			}
 		}
+		aminerLabelMu.Lock()
+		for _, c := range aminerLabelCounts {
+			result.AminerCounts += c
+		}
+		aminerLabelMu.Unlock()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(result)
 	})
