@@ -124,6 +124,19 @@ func countFromPayload(payload map[string]interface{}) {
 	}
 }
 
+// countPayloadLabels counts from local label map (used for direct API submissions)
+func countPayloadLabels(labels map[string][]string) {
+	aminerLabelMu.Lock()
+	defer aminerLabelMu.Unlock()
+	for _, values := range labels {
+		for _, v := range values {
+			if _, ok := labelValue[v]; ok {
+				aminerLabelCounts[v]++
+			}
+		}
+	}
+}
+
 // debugLog records failed transfers and suspicious annotations
 var debugLog = []map[string]interface{}{}
 var debugMu sync.Mutex
@@ -921,7 +934,7 @@ func main() {
 		}
 
 		// Spot-check first few annotated items for data integrity
-		for page := 1; page <= 2; page++ {
+		for page := 1; page <= 10; page++ {
 			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 			resp, err := doAMinerGet(url)
@@ -938,7 +951,7 @@ func main() {
 			json.Unmarshal(body, &data)
 			qBase := (page-1)*data.PageSize + 1
 			for i, p := range data.Prompts {
-				if p.State == 1 && result.Checked < 20 {
+				if p.State == 1 && result.Checked < 50 {
 					result.Checked++
 					qURL := annotBase() + "/api/v1/bench/questions/" + p.PromptID + "?uid="
 					qResp, err := doAMinerGet(qURL)
@@ -1113,6 +1126,8 @@ func main() {
 		respBody, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			st.UpdateLabelStatus(req.Hash, "", 0, "cloud_submitted", "API submitted directly")
+			// Count the labels for per-label statistics
+			countPayloadLabels(req.Labels)
 			log.Printf("[SUBMIT] Success for hash=%s prompt=%s", req.Hash, record.PromptID)
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"ok":true,"status":"cloud_submitted"}`))
