@@ -637,6 +637,28 @@ func main() {
 			if t, _ := raw["type"].(string); t == "captured-annot-api" {
 				log.Printf("[CAPTURED ANNOT] %v %v resp=%v",
 					raw["method"], raw["url"], raw["responseText"])
+				// Auto-extract apiToken from tasks API response
+				if u, _ := raw["url"].(string); strings.Contains(u, "/api/v1/tasks") {
+					if rt, _ := raw["responseText"].(string); rt != "" {
+						var taskResp struct {
+							Data []struct {
+								Config struct {
+									APIToken string `json:"apiToken"`
+								} `json:"config"`
+							} `json:"data"`
+						}
+						if json.Unmarshal([]byte(rt), &taskResp) == nil && len(taskResp.Data) > 0 && taskResp.Data[0].Config.APIToken != "" {
+							newToken := taskResp.Data[0].Config.APIToken
+							if newToken != config.Token {
+								config.Token = newToken
+								log.Printf("[SUBMIT] Auto-configured token from tasks API (len=%d)", len(newToken))
+								b, _ := json.Marshal(config)
+								os.WriteFile(filepath.Join(dataDir, "config.json"), b, 0644)
+								st.SaveConfig(b)
+							}
+						}
+					}
+				}
 			}
 			if t, _ := raw["type"].(string); t == "captured-postmessage" {
 				log.Printf("[CAPTURED POSTMSG] %v keys=%v data=%v",
