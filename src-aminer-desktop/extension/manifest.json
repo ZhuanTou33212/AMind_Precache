@@ -3,7 +3,8 @@
     "name":  "AMiner Realtime Monitor Bridge",
     "version":  "1.16",
     "permissions":  [
-                        "storage"
+                        "storage",
+                        "tabs"
                     ],
     "host_permissions":  [
                              "http://127.0.0.1:9800/*"
@@ -14,7 +15,10 @@
     "content_scripts":  [
                             {
                                 "matches":  [
-                                                "https://annot.aminer.cn/project/label_page_feed/*"
+                                                "https://annot.aminer.cn/project/label_page_feed/*",
+                                                "https://annot.aminer.cn/project/label_page_customize/*",
+                                                "http://10.9.172.235:13000/project/label_page_feed/*",
+                                                "http://10.9.172.235:13000/project/label_page_customize/*"
                                             ],
                                 "js":  [
                                            "monitor.js",
@@ -24,7 +28,10 @@
                             },
                             {
                                 "matches":  [
-                                                "https://annot.aminer.cn/project/label_page_feed/*"
+                                                "https://annot.aminer.cn/project/label_page_feed/*",
+                                                "https://annot.aminer.cn/project/label_page_customize/*",
+                                                "http://10.9.172.235:13000/project/label_page_feed/*",
+                                                "http://10.9.172.235:13000/project/label_page_customize/*"
                                             ],
                                 "js":  [
                                            "monitor-main.js"

@@ -16,7 +16,9 @@
                             {
                                 "matches":  [
                                                 "https://annot.aminer.cn/project/label_page_feed/*",
-                                                "http://10.9.172.235:13000/project/label_page_feed/*"
+                                                "https://annot.aminer.cn/project/label_page_customize/*",
+                                                "http://10.9.172.235:13000/project/label_page_feed/*",
+                                                "http://10.9.172.235:13000/project/label_page_customize/*"
                                             ],
                                 "js":  [
                                            "monitor.js",
@@ -27,7 +29,9 @@
                             {
                                 "matches":  [
                                                 "https://annot.aminer.cn/project/label_page_feed/*",
-                                                "http://10.9.172.235:13000/project/label_page_feed/*"
+                                                "https://annot.aminer.cn/project/label_page_customize/*",
+                                                "http://10.9.172.235:13000/project/label_page_feed/*",
+                                                "http://10.9.172.235:13000/project/label_page_customize/*"
                                             ],
                                 "js":  [
                                            "monitor-main.js"

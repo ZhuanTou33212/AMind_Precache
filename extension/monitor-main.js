@@ -31,7 +31,7 @@
 
   function urlConfig() {
     return {
-      taskId: detectedTaskId || (location.pathname.match(/\/label_page_feed\/([^/?#]+)/)||[])[1] || '',
+      taskId: detectedTaskId || (location.pathname.match(/\/label_page_(?:feed|customize)\/([^/?#]+)/)||[])[1] || '',
       startDate: detectedStartDate || new URLSearchParams(location.search).get('start') || ''
     };
   }
@@ -115,7 +115,7 @@
 
   function pageInfo() {
     const text = (document.body?.textContent || '').replace(/\s+/g, '');
-    const match = text.match(/第(\d+)题\/(\d+)/);
+    const match = text.match(/第(\d+)题\/(\d+)/) || text.match(/(\d+)题\/(\d+)/) || text.match(/(\d+)\/(\d+)/);
     if (!match) return null;
     return { question: Number(match[1]), total: Number(match[2]) };
   }
