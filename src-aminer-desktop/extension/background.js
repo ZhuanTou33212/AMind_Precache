@@ -6,7 +6,14 @@ const DEFAULT_GROUP_SIZE = 200;
 const MIN_GROUP_SIZE = 1;
 const PAGE_SIZE = 20;
 
-console.log('[AMiner cache background] v1.15 loaded, group size:', DEFAULT_GROUP_SIZE);
+// When extension updates/reloads, auto-refresh annot tabs to re-inject content scripts
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.tabs.query({ url: '*://*/project/label_page_feed/*' }, tabs => {
+    tabs.forEach(t => { try { chrome.tabs.reload(t.id); } catch(e) {} });
+  });
+});
+
+console.log('[AMiner cache background] v1.17 loaded, group size:', DEFAULT_GROUP_SIZE);
 
 let activeGroupStart = 0;
 let activeGroupEnd = 0;
@@ -15,6 +22,7 @@ let queuedQuestion = 0;
 let lastConfigKey = '';
 let groupSize = DEFAULT_GROUP_SIZE;
 let configLoaded = false;
+let ossHost = 'mm-group-image.oss-cn-beijing.aliyuncs.com';
 
 function post(path, data) {
   return fetch(SERVER + path, {
@@ -44,11 +52,18 @@ async function refreshConfig() {
   let nextGroupSize = DEFAULT_GROUP_SIZE;
   const settingsURL = chrome.runtime.getURL('settings.json');
   const settings = await fetch(settingsURL).then(r => r.json()).catch(() => null);
-  if (settings && settings.cacheSize !== undefined) nextGroupSize = normalizeGroupSize(settings.cacheSize);
+  if (settings && settings.cacheSize !== undefined) {
+    nextGroupSize = normalizeGroupSize(settings.cacheSize);
+  }
   const localSettings = await storageGet(['cacheSize']).catch(() => ({}));
-  if ((!settings || settings.cacheSize === undefined) && (!config || config.cacheSize === undefined) && localSettings && localSettings.cacheSize !== undefined) nextGroupSize = normalizeGroupSize(localSettings.cacheSize);
-  if (config && config.cacheSize !== undefined) nextGroupSize = normalizeGroupSize(config.cacheSize);
+  if (localSettings && localSettings.cacheSize !== undefined && (!config || config.cacheSize === undefined)) {
+    nextGroupSize = normalizeGroupSize(localSettings.cacheSize);
+  }
+  if (config && config.cacheSize !== undefined) {
+    nextGroupSize = normalizeGroupSize(config.cacheSize);
+  }
   if (groupSize !== nextGroupSize) { groupSize = nextGroupSize; if (activeGroupStart > 0) activeGroupEnd = activeGroupStart + groupSize - 1; }
+  if (config && config.ossHost) ossHost = config.ossHost;
   configLoaded = true;
   return config || {};
 }
@@ -58,7 +73,9 @@ function questionIndex(question) { return question - (questionPage(question) - 1
 
 function imageURL(question) {
   const text = JSON.stringify(question);
-  const m = text.match(/https:\/\/mm-group-image\.oss-cn-beijing\.aliyuncs\.com\/[^\s"'<>)]+/g);
+  const escaped = ossHost.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp('https://' + escaped + '/[^\\s"\'<>)]+', 'g');
+  const m = text.match(pattern);
   return m && m[0] ? m[0].replace(/[)\].,;]+$/g, '') : '';
 }
 
@@ -133,11 +150,17 @@ async function ensureGroup(question) {
 chrome.runtime.onConnect.addListener(port => {
   refreshConfig();
   const ci = setInterval(() => refreshConfig(), 30000);
+  port.postMessage({ type: 'cache-settings', cacheSize: groupSize, ossHost });
   const pi = setInterval(async () => {
-    try { const images = await api('/api/images').catch(() => []); port.postMessage({ type: 'cache-list', images: images || [], cacheSize: groupSize }); } catch (e) {}
+    try { const images = await api('/api/images').catch(() => []); port.postMessage({ type: 'cache-list', images: images || [], cacheSize: groupSize, ossHost }); } catch (e) {}
   }, 1000);
   port.onMessage.addListener(async msg => {
     if (msg.type === 'cleanup') { clearCache(); return; }
+    if (msg.type === 'platform-init') {
+      // Always forward platformUrl — do NOT overwrite taskId/startDate
+      if (msg.platformUrl) post('/api/config', { platformUrl: msg.platformUrl });
+      return;
+    }
     if (msg.type === 'get-labels-config') {
       const config = await api('/api/labels-config').catch(() => null);
       port.postMessage({ type: 'labels-config', config });
@@ -158,15 +181,25 @@ chrome.runtime.onConnect.addListener(port => {
     if (msg.type === 'cache-size') { groupSize = normalizeGroupSize(msg.cacheSize); storageSet({ cacheSize: groupSize }).catch(() => {}); port.postMessage({ type: 'cache-settings', cacheSize: groupSize }); return; }
     if (msg.type === 'config') {
       if (!configLoaded) await refreshConfig();
-      const token = String(msg.token || '').trim(), taskId = String(msg.taskId || '').trim(), startDate = String(msg.startDate || '').trim();
+      const token = String(msg.token || '').trim(), taskId = String(msg.taskId || '').trim(), startDate = String(msg.startDate || '').trim(), platformUrl = String(msg.platformUrl || '').trim();
       if (!token) return;
-      const key = token + '|' + taskId + '|' + startDate;
-      if (key !== lastConfigKey) { lastConfigKey = key; post('/api/config', { token, taskId, startDate, cacheSize: groupSize }); }
+      const key = token + '|' + platformUrl + '|' + taskId + '|' + startDate;
+      if (key !== lastConfigKey) { lastConfigKey = key; post('/api/config', { token, taskId, startDate, cacheSize: groupSize, platformUrl }); }
       return;
     }
     post('/api/monitor', msg);
     if (msg.type === 'submission') { if (msg.question) ensureGroup(Number(msg.question) + 1); return; }
     if (msg.question) ensureGroup(Number(msg.question));
   });
-  port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); });
+
+  // Auto-start caching for label_page_customize (KB-SDK doesn't report question numbers)
+  let autoCacheTimer = setTimeout(async () => {
+    const imgs = await api('/api/images').catch(() => []);
+    if ((!imgs || !imgs.length) && groupSize > 0) {
+      console.log('[BG] Auto-start caching from Q1');
+      try { ensureGroup(1); } catch(e) {}
+    }
+  }, 8000);
+
+  port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); clearTimeout(autoCacheTimer); });
 });
