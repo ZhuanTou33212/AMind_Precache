@@ -626,6 +626,7 @@ func main() {
 						if sub.Responses[0].RespID != "" {
 							respCacheMu.Lock()
 							respCache[sub.PromptID] = sub.Responses[0].RespID
+							if len(respCache) > 500 { respCache = map[string]string{} }
 							respCacheMu.Unlock()
 							log.Printf("[SUBMIT] Cached real resp_id %s for prompt %s", sub.Responses[0].RespID, sub.PromptID)
 						}
@@ -1151,6 +1152,12 @@ func main() {
 					if len(data.Prompts) < data.PageSize { break }
 				}
 				log.Printf("[OSS-VERIFY] Task %s: %d items ready", t.ID, t.Total)
+				// Auto-cleanup after 10 min
+				time.AfterFunc(10*time.Minute, func() {
+					ossTaskMu.Lock()
+					if ossTask != nil && ossTask.ID == t.ID { ossTask = nil }
+					ossTaskMu.Unlock()
+				})
 			}()
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			json.NewEncoder(w).Encode(map[string]interface{}{"id": t.ID, "total": 0, "items": nil, "preparing": true})
