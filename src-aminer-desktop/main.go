@@ -277,7 +277,7 @@ func pollAnnotations() {
 		if config.Token == "" || config.TaskID == "" || config.StartDate == "" || monPage == 0 {
 			continue
 		}
-		url := fmt.Sprintf(annotBase()+"/api/v1/annotations/annot/prompts/task/%s/date/%s/v2?page=%d",
+		url := fmt.Sprintf(annotBase()+"/v1/annotations/annot/prompts/task/%s/date/%s/v2?page=%d",
 			config.TaskID, config.StartDate, monPage)
 		resp, err := doAMinerGet(url)
 		if err != nil {
@@ -565,12 +565,12 @@ func main() {
 		w.Write([]byte(`{"ok":true}`))
 	})
 
-	mux.HandleFunc("/api/prompts", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/api/prompts", func(w http.ResponseWriter, r *http.Request) {
 		page := r.URL.Query().Get("page")
 		if page == "" {
 			page = "1"
 		}
-		url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+		url := annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=" + page
 		resp, err := doAMinerGet(url)
 		if err != nil {
@@ -588,7 +588,7 @@ func main() {
 			http.Error(w, "missing id", 400)
 			return
 		}
-		resp, err := doAMinerGet(annotBase() + "/api/v1/bench/questions/" + pid + "?uid=")
+		resp, err := doAMinerGet(annotBase() + "/v1/bench/questions/" + pid + "?uid=")
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -841,7 +841,7 @@ func main() {
 			}
 		}
 		// First call: get indicator for start page
-		startResp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+		startResp, err := doAMinerGet(annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=1")
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -858,7 +858,7 @@ func main() {
 		result.Total = indicator.Indicator.TotalCnt
 		pageStart := page
 		for {
-			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			url := annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 			resp, err := doAMinerGet(url)
 			if err != nil {
@@ -918,7 +918,7 @@ func main() {
 		amTotal, amAnnotated := 0, 0
 		var amSuspicious []int
 		if config.Token != "" && config.TaskID != "" && config.StartDate != "" {
-			startResp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			startResp, err := doAMinerGet(annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=1")
 			if err == nil {
 				var indicator struct {
@@ -944,7 +944,7 @@ func main() {
 					}
 					if ok && annotMaxPage > 0 {
 						for page := 1; page <= annotMaxPage && page <= 5; page++ {
-							url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+							url := annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 								"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 							resp, err := doAMinerGet(url)
 							if err != nil {
@@ -1125,7 +1125,7 @@ func main() {
 		result := verifyResult{}
 
 		// Get AMiner annotated count from indicator
-		startResp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+		startResp, err := doAMinerGet(annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=1")
 		if err == nil {
 			var indicator struct {
@@ -1141,7 +1141,7 @@ func main() {
 
 		// Spot-check first few annotated items for data integrity
 		for page := 1; page <= 10; page++ {
-			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			url := annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 			resp, err := doAMinerGet(url)
 			if err != nil {
@@ -1161,7 +1161,7 @@ func main() {
 			for i, p := range data.Prompts {
 				if p.State == 1 && result.Checked < 50 {
 					result.Checked++
-					qURL := annotBase() + "/api/v1/bench/questions/" + p.PromptID + "?uid="
+					qURL := annotBase() + "/v1/bench/questions/" + p.PromptID + "?uid="
 					qResp, err := doAMinerGet(qURL)
 					if err != nil {
 						result.Failed++
@@ -1338,7 +1338,7 @@ func main() {
 		bodyJSON, _ := json.Marshal(body)
 		log.Printf("[SUBMIT] Sending: %s", string(bodyJSON))
 
-		resp, err := doAMinerPost(annotBase()+"/api/v1/annotations/annot/responses", bodyJSON)
+		resp, err := doAMinerPost(annotBase()+"/v1/annotations/annot/responses", bodyJSON)
 		if err != nil {
 			st.UpdateLabelStatus(req.Hash, "", 0, "submit_failed", err.Error())
 			addDebugEntry("submit_error", map[string]interface{}{"hash": req.Hash, "promptId": record.PromptID, "questionNum": record.QuestionNum, "error": err.Error()})
@@ -1507,7 +1507,7 @@ func rebuildCacheFrom(startQ, maxImages int, done <-chan struct{}) {
 			return
 		default:
 		}
-		promptsURL := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+		promptsURL := annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 		resp, err := doAMinerGet(promptsURL)
 		if err != nil { log.Printf("[CACHE] Page %d error: %v", page, err); break }
@@ -1532,7 +1532,7 @@ func rebuildCacheFrom(startQ, maxImages int, done <-chan struct{}) {
 			p := data.Prompts[i]
 			if p.State == 1 { continue }
 			qn := qBase + i
-			qResp, err := doAMinerGet(annotBase() + "/api/v1/bench/questions/" + p.PromptID + "?uid=")
+			qResp, err := doAMinerGet(annotBase() + "/v1/bench/questions/" + p.PromptID + "?uid=")
 			if err != nil { continue }
 			var qData struct {
 				Responses []struct{ Reply string `json:"reply"` } `json:"responses"`
@@ -1562,7 +1562,7 @@ func syncAllAnnotations() {
 	page := 1
 	synced := 0
 	for {
-		resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+		resp, err := doAMinerGet(annotBase() + "/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
 		if err != nil {
 			break
@@ -1597,7 +1597,7 @@ func syncAllAnnotations() {
 
 // getRespID calls bench/questions API and extracts the first response's id (resp_id)
 func getRespID(promptID string) (string, error) {
-	url := annotBase() + "/api/v1/bench/questions/" + promptID + "?uid="
+	url := annotBase() + "/v1/bench/questions/" + promptID + "?uid="
 	resp, err := doAMinerGet(url)
 	if err != nil {
 		return "", err
@@ -1634,7 +1634,7 @@ func findAssignmentID(taskID, startDate, promptID string, questionNum int) int {
 		if page < 1 {
 			continue
 		}
-		url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + taskID +
+		url := annotBase() + "/v1/annotations/annot/prompts/task/" + taskID +
 			"/date/" + startDate + "/v2?page=" + strconv.Itoa(page)
 		resp, err := doAMinerGet(url)
 		if err != nil {
