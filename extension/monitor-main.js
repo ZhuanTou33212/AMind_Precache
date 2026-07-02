@@ -18,6 +18,55 @@
     window.dispatchEvent(new CustomEvent('aminer-monitor:event', { detail }));
   }
 
+  function serializeRequestBody(body) {
+    var result = { type: body == null ? 'empty' : Object.prototype.toString.call(body), text: '' };
+    try {
+      if (body == null) return result;
+      if (typeof body === 'string') { result.type = 'string'; result.text = body; return result; }
+      if (body instanceof URLSearchParams) {
+        result.type = 'URLSearchParams';
+        result.text = body.toString();
+        result.fields = {};
+        body.forEach(function(value, key) { result.fields[key] = value; });
+        return result;
+      }
+      if (body instanceof FormData) {
+        result.type = 'FormData';
+        result.fields = {};
+        body.forEach(function(value, key) {
+          if (value instanceof File) result.fields[key] = { name: value.name, type: value.type, size: value.size };
+          else result.fields[key] = value;
+        });
+        result.text = JSON.stringify(result.fields);
+        return result;
+      }
+      if (body instanceof Blob) {
+        result.type = body instanceof File ? 'File' : 'Blob';
+        result.blob = { type: body.type, size: body.size, name: body.name || '' };
+        result.text = '[blob size=' + body.size + ' type=' + body.type + ']';
+        return result;
+      }
+      if (body instanceof ArrayBuffer) {
+        result.type = 'ArrayBuffer';
+        result.bytes = body.byteLength;
+        result.text = '[arraybuffer bytes=' + body.byteLength + ']';
+        return result;
+      }
+      if (ArrayBuffer.isView(body)) {
+        result.type = body.constructor && body.constructor.name || 'TypedArray';
+        result.bytes = body.byteLength || body.length || 0;
+        result.text = '[typedarray bytes=' + result.bytes + ']';
+        return result;
+      }
+      result.text = JSON.stringify(body);
+      return result;
+    } catch(e) {
+      result.error = e.message || String(e);
+      try { result.text = String(body); } catch(er) {}
+      return result;
+    }
+  }
+
   function normalizeToken(value) {
     const token = String(value || '').trim().replace(/^Bearer\s+/i, '');
     return token || '';
@@ -326,15 +375,13 @@
         }
         // Capture submission API details for direct API research
         if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && submitRE.test(url)) {
-          var bodyPreview = '';
-          try {
-            if (typeof this.__aminerBody === 'string') bodyPreview = this.__aminerBody;
-            else if (this.__aminerBody) bodyPreview = JSON.stringify(this.__aminerBody);
-          } catch(e) {}
+          var bodyData = serializeRequestBody(this.__aminerBody);
+          var bodyPreview = bodyData.text || '';
           console.groupCollapsed('[Monitor main] CAPTURED SUBMISSION API');
           console.log('URL:', url);
           console.log('Method:', method);
           console.log('Status:', this.status);
+          console.log('Request body type:', bodyData.type);
           console.log('Request body:', bodyPreview);
           console.log('Response:', (this.responseText || '').substring(0, 500));
           console.groupEnd();
@@ -343,6 +390,8 @@
             url: url,
             method: method,
             requestBody: bodyPreview,
+            requestBodyType: bodyData.type,
+            requestBodyData: bodyData,
             status: this.status,
             responsePreview: (this.responseText || '').substring(0, 2000)
           });
@@ -381,15 +430,13 @@
           }
           // Capture submission API
           if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && submitRE.test(url)) {
-            var bodyPreview = '';
-            try {
-              if (typeof body === 'string') bodyPreview = body;
-              else if (body) bodyPreview = JSON.stringify(body);
-            } catch(e) {}
+            var bodyData = serializeRequestBody(body);
+            var bodyPreview = bodyData.text || '';
             console.groupCollapsed('[Monitor main] CAPTURED SUBMISSION API (fetch)');
             console.log('URL:', url);
             console.log('Method:', method);
             console.log('Status:', response.status);
+            console.log('Request body type:', bodyData.type);
             console.log('Request body:', bodyPreview);
             console.groupEnd();
             emit({
@@ -397,6 +444,8 @@
               url: url,
               method: method,
               requestBody: bodyPreview,
+              requestBodyType: bodyData.type,
+              requestBodyData: bodyData,
               status: response.status,
               responsePreview: ''
             });

@@ -92,6 +92,8 @@ type monState struct {
 
 var respCache = map[string]string{} // prompt_id → resp_id (learned from web submissions)
 var respCacheMu sync.Mutex
+var submitPayloadTemplate map[string]interface{}
+var submitPayloadTemplateMu sync.Mutex
 
 // aminerLabelCounts tracks per-label counts from captured web submissions
 var aminerLabelCounts = map[string]int{}
@@ -99,12 +101,12 @@ var aminerLabelMu sync.Mutex
 
 // reverseLabelValue maps payload float64 value → label name
 var reverseLabelValue = map[float64]map[string]string{
-	1:  {"level": "惊艳"},
+	1:   {"level": "惊艳"},
 	0.5: {"level": "好看"},
-	2:  {"level": "还不错"},
-	0:  {"level": "一般"},
-	-1: {"level": "不堪"},
-	-2: {"level": "带边框"},
+	2:   {"level": "还不错"},
+	0:   {"level": "一般"},
+	-1:  {"level": "不堪"},
+	-2:  {"level": "带边框"},
 }
 var reverseWatermark = map[float64]string{
 	1: "带水印",
@@ -113,16 +115,107 @@ var reverseWatermark = map[float64]string{
 func countFromPayload(payload map[string]interface{}) {
 	aminerLabelMu.Lock()
 	defer aminerLabelMu.Unlock()
-	if level, ok := payload["level"].(float64); ok {
+	if level, ok := asFloat64(payload["level"]); ok {
 		if m, ok2 := reverseLabelValue[level]; ok2 {
 			aminerLabelCounts[m["level"]]++
 		}
 	}
-	if wm, ok := payload["watermark"].(float64); ok {
+	if wm, ok := asFloat64(payload["watermark"]); ok {
 		if label, ok2 := reverseWatermark[wm]; ok2 {
 			aminerLabelCounts[label]++
 		}
 	}
+}
+
+func asFloat64(v interface{}) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case float32:
+		return float64(x), true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case json.Number:
+		n, err := x.Float64()
+		return n, err == nil
+	case string:
+		n, err := strconv.ParseFloat(x, 64)
+		return n, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func clonePayloadTemplate(src map[string]interface{}) map[string]interface{} {
+	dst := map[string]interface{}{}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func coercePayloadValue(template interface{}, value float64) interface{} {
+	switch template.(type) {
+	case bool:
+		return value != 0
+	case string:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case []interface{}:
+		return []interface{}{value}
+	default:
+		return value
+	}
+}
+
+func rememberSubmitPayloadTemplate(payload map[string]interface{}) {
+	if payload == nil {
+		return
+	}
+	submitPayloadTemplateMu.Lock()
+	submitPayloadTemplate = clonePayloadTemplate(payload)
+	submitPayloadTemplateMu.Unlock()
+}
+
+func capturedSubmissionBody(raw map[string]interface{}) []byte {
+	data, ok := raw["requestBodyData"].(map[string]interface{})
+	if ok {
+		fields, hasFields := data["fields"].(map[string]interface{})
+		if hasFields {
+			for _, key := range []string{"data", "payload", "body", "json"} {
+				if b := capturedFieldJSON(fields[key]); len(b) > 0 {
+					return b
+				}
+			}
+			for _, value := range fields {
+				if b := capturedFieldJSON(value); len(b) > 0 {
+					return b
+				}
+			}
+		}
+		if text, ok := data["text"].(string); ok && strings.TrimSpace(text) != "" {
+			return []byte(text)
+		}
+	}
+	if rb, ok := raw["requestBody"].(string); ok && strings.TrimSpace(rb) != "" {
+		return []byte(rb)
+	}
+	return nil
+}
+
+func capturedFieldJSON(value interface{}) []byte {
+	switch v := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			return []byte(trimmed)
+		}
+	case map[string]interface{}:
+		b, _ := json.Marshal(v)
+		return b
+	}
+	return nil
 }
 
 // countPayloadLabels counts from local label map (used for direct API submissions)
@@ -191,7 +284,7 @@ func pollAnnotations() {
 			continue
 		}
 		var data struct {
-			Prompts   []struct {
+			Prompts []struct {
 				PromptID string `json:"prompt_id"`
 				State    int    `json:"state"`
 			} `json:"prompts"`
@@ -528,7 +621,9 @@ func main() {
 		total, annotated := st.CountAnnotations()
 		aminerLabelMu.Lock()
 		labelSums := make(map[string]int)
-		for k, v := range aminerLabelCounts { labelSums[k] = v }
+		for k, v := range aminerLabelCounts {
+			labelSums[k] = v
+		}
 		aminerLabelMu.Unlock()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -551,7 +646,9 @@ func main() {
 		}
 		aminerLabelMu.Lock()
 		labelSums := make(map[string]int)
-		for k, v := range aminerLabelCounts { labelSums[k] = v }
+		for k, v := range aminerLabelCounts {
+			labelSums[k] = v
+		}
 		aminerLabelMu.Unlock()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -595,18 +692,22 @@ func main() {
 		var raw map[string]interface{}
 		if json.Unmarshal(bodyBytes, &raw) == nil {
 			if t, _ := raw["type"].(string); t == "captured-submission-api" {
-				log.Printf("[CAPTURED API] %v %v status=%v body=%v",
-					raw["method"], raw["url"], raw["status"], raw["requestBody"])
+				log.Printf("[CAPTURED API] %v %v status=%v bodyType=%v body=%v",
+					raw["method"], raw["url"], raw["status"], raw["requestBodyType"], raw["requestBody"])
+				addDebugEntry("captured_submission_api", map[string]interface{}{
+					"method": raw["method"], "url": raw["url"], "status": raw["status"],
+					"bodyType": raw["requestBodyType"], "requestBody": raw["requestBody"],
+				})
 				// Store real resp_id from web submission for direct API use
-				if rb, ok := raw["requestBody"].(string); ok {
+				if rb := capturedSubmissionBody(raw); len(rb) > 0 {
 					var sub struct {
-						PromptID string `json:"prompt_id"`
+						PromptID  string `json:"prompt_id"`
 						Responses []struct {
 							RespID  string                 `json:"resp_id"`
 							Payload map[string]interface{} `json:"payload"`
 						} `json:"responses"`
 					}
-					if json.Unmarshal([]byte(rb), &sub) == nil && sub.PromptID != "" && len(sub.Responses) > 0 {
+					if json.Unmarshal(rb, &sub) == nil && sub.PromptID != "" && len(sub.Responses) > 0 {
 						if sub.Responses[0].RespID != "" {
 							respCacheMu.Lock()
 							respCache[sub.PromptID] = sub.Responses[0].RespID
@@ -615,14 +716,17 @@ func main() {
 						}
 						// Count per-label from payload values
 						if sub.Responses[0].Payload != nil {
+							rememberSubmitPayloadTemplate(sub.Responses[0].Payload)
 							countFromPayload(sub.Responses[0].Payload)
 						}
 					}
 				}
 				// Auto-extract tagger_id from first captured submission
-				if rb, ok := raw["requestBody"].(string); ok && config.TaggerID == "" {
-					var sub struct{ TaggerID string `json:"tagger_id"` }
-					if json.Unmarshal([]byte(rb), &sub) == nil && sub.TaggerID != "" {
+				if rb := capturedSubmissionBody(raw); len(rb) > 0 && config.TaggerID == "" {
+					var sub struct {
+						TaggerID string `json:"tagger_id"`
+					}
+					if json.Unmarshal(rb, &sub) == nil && sub.TaggerID != "" {
 						config.TaggerID = sub.TaggerID
 						log.Printf("[SUBMIT] Auto-configured tagger_id=%s", config.TaggerID)
 						b, _ := json.Marshal(config)
@@ -710,7 +814,7 @@ func main() {
 			Total      int      `json:"total"`
 			Annotated  int      `json:"annotated"`
 			Pending    int      `json:"pending"`
-			Suspicious []int   `json:"suspicious"`
+			Suspicious []int    `json:"suspicious"`
 			Errors     []string `json:"errors,omitempty"`
 		}
 		result := statResult{}
@@ -729,7 +833,9 @@ func main() {
 			return
 		}
 		var indicator struct {
-			Indicator struct{ TotalCnt int `json:"total_cnt"` } `json:"indicator"`
+			Indicator struct {
+				TotalCnt int `json:"total_cnt"`
+			} `json:"indicator"`
 		}
 		ibody, _ := io.ReadAll(startResp.Body)
 		startResp.Body.Close()
@@ -742,12 +848,14 @@ func main() {
 			resp, err := doAMinerGet(url)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("page %d: %v", page, err))
-				if page-pageStart > 5 { break }
+				if page-pageStart > 5 {
+					break
+				}
 				page++
 				continue
 			}
 			var data struct {
-				Prompts   []struct {
+				Prompts []struct {
 					ID       int    `json:"id"`
 					PromptID string `json:"prompt_id"`
 					State    int    `json:"state"`
@@ -761,18 +869,18 @@ func main() {
 			if json.Unmarshal(body, &data) != nil {
 				break
 			}
-		qBase := (page-1)*data.PageSize + 1
-		for i, p := range data.Prompts {
-			qn := qBase + i
-			if p.State == 1 {
-				result.Annotated++
-				if p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-") {
-					result.Suspicious = append(result.Suspicious, qn)
+			qBase := (page-1)*data.PageSize + 1
+			for i, p := range data.Prompts {
+				qn := qBase + i
+				if p.State == 1 {
+					result.Annotated++
+					if p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-") {
+						result.Suspicious = append(result.Suspicious, qn)
+					}
+				} else {
+					result.Pending++
 				}
-			} else {
-				result.Pending++
 			}
-		}
 			if page >= data.TotalPage || len(data.Prompts) < data.PageSize {
 				break
 			}
@@ -787,9 +895,9 @@ func main() {
 	mux.HandleFunc("/api/label-stats", func(w http.ResponseWriter, r *http.Request) {
 		images := st.ListImages()
 		type labelCount struct {
-			GroupID   string `json:"groupId"`
-			Label     string `json:"label"`
-			Count     int    `json:"count"`
+			GroupID string `json:"groupId"`
+			Label   string `json:"label"`
+			Count   int    `json:"count"`
 		}
 		// Query AMiner stats
 		amTotal, amAnnotated := 0, 0
@@ -799,7 +907,7 @@ func main() {
 				"/date/" + config.StartDate + "/v2?page=1")
 			if err == nil {
 				var indicator struct {
-					Indicator struct{
+					Indicator struct {
 						TotalCnt int `json:"total_cnt"`
 						AnnotCnt int `json:"annot_cnt"`
 					} `json:"indicator"`
@@ -824,9 +932,11 @@ func main() {
 							url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 								"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 							resp, err := doAMinerGet(url)
-							if err != nil { break }
+							if err != nil {
+								break
+							}
 							var data struct {
-								Prompts []struct{
+								Prompts []struct {
 									PromptID string `json:"prompt_id"`
 									State    int    `json:"state"`
 								} `json:"prompts"`
@@ -834,14 +944,18 @@ func main() {
 							}
 							body, _ := io.ReadAll(resp.Body)
 							resp.Body.Close()
-							if json.Unmarshal(body, &data) != nil { break }
+							if json.Unmarshal(body, &data) != nil {
+								break
+							}
 							qBase := (page-1)*data.PageSize + 1
 							for i, p := range data.Prompts {
 								if p.State == 1 && (p.PromptID == "" || len(p.PromptID) < 10 || !strings.Contains(p.PromptID, "-")) {
 									amSuspicious = append(amSuspicious, qBase+i)
 								}
 							}
-							if len(data.Prompts) < data.PageSize { break }
+							if len(data.Prompts) < data.PageSize {
+								break
+							}
 						}
 					}
 				}
@@ -856,7 +970,9 @@ func main() {
 		if len(cfgBody) >= 3 && cfgBody[0] == 0xEF && cfgBody[1] == 0xBB && cfgBody[2] == 0xBF {
 			cfgBody = cfgBody[3:]
 		}
-		if len(cfgBody) == 0 { cfgBody = defaultLabelsConfig }
+		if len(cfgBody) == 0 {
+			cfgBody = defaultLabelsConfig
+		}
 		var lCfg struct {
 			Groups []struct {
 				ID      string `json:"id"`
@@ -948,7 +1064,10 @@ func main() {
 				gID := ""
 				for _, g := range lCfg.Groups {
 					for _, opt := range g.Options {
-						if opt.Label == label { gID = g.ID; break }
+						if opt.Label == label {
+							gID = g.ID
+							break
+						}
 					}
 				}
 				counts = append(counts, labelCount{GroupID: gID, Label: label, Count: c})
@@ -957,13 +1076,13 @@ func main() {
 		aminerLabelMu.Unlock()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"labels":          counts,
-			"groups":          lCfg.Groups,
-			"amTotal":         amTotal,
-			"amAnnotated":     amAnnotated,
-			"amSuspicious":    amSuspicious,
-			"failedQ":         failedQ,
-			"aminerCaptured":  aminerTotal,
+			"labels":         counts,
+			"groups":         lCfg.Groups,
+			"amTotal":        amTotal,
+			"amAnnotated":    amAnnotated,
+			"amSuspicious":   amSuspicious,
+			"failedQ":        failedQ,
+			"aminerCaptured": aminerTotal,
 		})
 	})
 
@@ -995,7 +1114,9 @@ func main() {
 			"/date/" + config.StartDate + "/v2?page=1")
 		if err == nil {
 			var indicator struct {
-				Indicator struct{ AnnotCnt int `json:"annot_cnt"` } `json:"indicator"`
+				Indicator struct {
+					AnnotCnt int `json:"annot_cnt"`
+				} `json:"indicator"`
 			}
 			ibody, _ := io.ReadAll(startResp.Body)
 			startResp.Body.Close()
@@ -1008,9 +1129,11 @@ func main() {
 			url := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 				"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
 			resp, err := doAMinerGet(url)
-			if err != nil { break }
+			if err != nil {
+				break
+			}
 			var data struct {
-				Prompts []struct{
+				Prompts []struct {
 					PromptID string `json:"prompt_id"`
 					State    int    `json:"state"`
 				} `json:"prompts"`
@@ -1031,7 +1154,9 @@ func main() {
 						continue
 					}
 					var qData struct {
-						Responses []struct{ Reply string `json:"reply"` } `json:"responses"`
+						Responses []struct {
+							Reply string `json:"reply"`
+						} `json:"responses"`
 					}
 					rb, _ := io.ReadAll(qResp.Body)
 					qResp.Body.Close()
@@ -1044,7 +1169,9 @@ func main() {
 					}
 				}
 			}
-			if len(data.Prompts) < data.PageSize { break }
+			if len(data.Prompts) < data.PageSize {
+				break
+			}
 		}
 
 		// Per-label counts from local SQLite
@@ -1052,29 +1179,41 @@ func main() {
 		countMap := map[string]int{}
 		cfgPath := filepath.Join(dataDir, "labels-config.json")
 		cfgBody, _ := os.ReadFile(cfgPath)
-		if len(cfgBody) >= 3 && cfgBody[0] == 0xEF && cfgBody[1] == 0xBB && cfgBody[2] == 0xBF { cfgBody = cfgBody[3:] }
-		if len(cfgBody) == 0 { cfgBody = defaultLabelsConfig }
+		if len(cfgBody) >= 3 && cfgBody[0] == 0xEF && cfgBody[1] == 0xBB && cfgBody[2] == 0xBF {
+			cfgBody = cfgBody[3:]
+		}
+		if len(cfgBody) == 0 {
+			cfgBody = defaultLabelsConfig
+		}
 		var lCfg struct {
 			Groups []struct {
 				ID      string `json:"id"`
-				Options []struct{ Label string `json:"label"` } `json:"options"`
+				Options []struct {
+					Label string `json:"label"`
+				} `json:"options"`
 			} `json:"groups"`
 		}
 		json.Unmarshal(cfgBody, &lCfg)
 		for _, img := range images {
-			if img.LabelText == "" { continue }
+			if img.LabelText == "" {
+				continue
+			}
 			switch raw := img.Labels.(type) {
 			case map[string]interface{}:
 				for _, vals := range raw {
 					if arr, ok := vals.([]interface{}); ok {
 						for _, item := range arr {
-							if s, ok := item.(string); ok { countMap[s]++ }
+							if s, ok := item.(string); ok {
+								countMap[s]++
+							}
 						}
 					}
 				}
 			case map[string][]string:
 				for _, vals := range raw {
-					for _, s := range vals { countMap[s]++ }
+					for _, s := range vals {
+						countMap[s]++
+					}
 				}
 			}
 			result.LocalLabeled++
@@ -1279,16 +1418,20 @@ func mustAtoi(s string) int {
 }
 
 func syncAllAnnotations() {
-	if config.Token == "" || config.TaskID == "" || config.StartDate == "" { return }
+	if config.Token == "" || config.TaskID == "" || config.StartDate == "" {
+		return
+	}
 	log.Printf("[SYNC] Starting full annotation sync...")
 	page := 1
 	synced := 0
 	for {
 		resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
-		if err != nil { break }
+		if err != nil {
+			break
+		}
 		var data struct {
-			Prompts []struct{
+			Prompts []struct {
 				ID       int    `json:"id"`
 				PromptID string `json:"prompt_id"`
 				State    int    `json:"state"`
@@ -1297,7 +1440,9 @@ func syncAllAnnotations() {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if json.Unmarshal(body, &data) != nil { break }
+		if json.Unmarshal(body, &data) != nil {
+			break
+		}
 		qBase := (page-1)*data.PageSize + 1
 		for i, p := range data.Prompts {
 			st.UpsertAnnotation(store.AnnotationSlot{
@@ -1305,7 +1450,9 @@ func syncAllAnnotations() {
 			})
 			synced++
 		}
-		if len(data.Prompts) < data.PageSize { break }
+		if len(data.Prompts) < data.PageSize {
+			break
+		}
 		page++
 	}
 	log.Printf("[SYNC] Done: %d pages, %d items synced", page-1, synced)
@@ -1378,17 +1525,30 @@ func findAssignmentID(taskID, startDate, promptID string, questionNum int) int {
 
 // labelValue maps user-facing label text to submission payload numeric values
 var labelValue = map[string]float64{
-	"惊艳":   1,
-	"好看":   0.5,
-	"还不错":  2,
-	"一般":   0,
-	"不堪":   -1,
-	"带边框":  -2,
-	"带水印":  1,
+	"惊艳":  1,
+	"好看":  0.5,
+	"还不错": 2,
+	"一般":  0,
+	"不堪":  -1,
+	"带边框": -2,
+	"带水印": 1,
 }
 
-func mapLabelsToPayload(labels map[string][]string) map[string]float64 {
-	payload := map[string]float64{"level": 0, "watermark": 0}
+func mapLabelsToPayload(labels map[string][]string) map[string]interface{} {
+	submitPayloadTemplateMu.Lock()
+	if submitPayloadTemplate != nil {
+		payload := clonePayloadTemplate(submitPayloadTemplate)
+		submitPayloadTemplateMu.Unlock()
+		applyLabelsToPayload(payload, labels)
+		return payload
+	}
+	submitPayloadTemplateMu.Unlock()
+	payload := map[string]interface{}{"level": float64(0), "watermark": float64(0)}
+	applyLabelsToPayload(payload, labels)
+	return payload
+}
+
+func applyLabelsToPayload(payload map[string]interface{}, labels map[string][]string) {
 	for groupID, values := range labels {
 		for _, v := range values {
 			num, ok := labelValue[v]
@@ -1397,13 +1557,12 @@ func mapLabelsToPayload(labels map[string][]string) map[string]float64 {
 			}
 			switch groupID {
 			case "quality":
-				payload["level"] = num
+				payload["level"] = coercePayloadValue(payload["level"], num)
 			case "watermark":
-				payload["watermark"] = num
+				payload["watermark"] = coercePayloadValue(payload["watermark"], num)
 			}
 		}
 	}
-	return payload
 }
 
 func openBrowser(url string) {
