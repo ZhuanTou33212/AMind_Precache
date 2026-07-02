@@ -398,13 +398,14 @@ func main() {
 		config.OssHost = "mm-group-image.oss-cn-beijing.aliyuncs.com"
 	}
 
-	// Auto-start annotation monitor if config is complete
-	if config.Token != "" && config.TaskID != "" && config.StartDate != "" && !monRunning {
-		monRunning = true
-		monPage = 1
-		go pollAnnotations()
-		log.Printf("Auto-started annotation monitor (page=1)")
-	}
+	// No auto-start annotation monitor — manual cache management
+	// (pollAnnotations deletes cached images when annotated, conflicting with manual cache)
+	// if config.Token != "" && config.TaskID != "" && config.StartDate != "" && !monRunning {
+	//	monRunning = true
+	//	monPage = 1
+	//	go pollAnnotations()
+	//	log.Printf("Auto-started annotation monitor (page=1)")
+	// }
 
 	// Apply stored cacheSize to store
 	if config.CacheSize > 0 {
@@ -483,12 +484,12 @@ func main() {
 			if config.CacheSize > 0 && config.CacheSize != oldCacheSize {
 				st.SetMaxKeep(config.CacheSize)
 			}
-			// Auto-start monitor if newly configured
-			if config.Token != "" && config.TaskID != "" && config.StartDate != "" && !monRunning {
-				monRunning = true
-				monPage = 1
-				go pollAnnotations()
-			}
+			// No auto-start monitor — manual cache management
+			// if config.Token != "" && config.TaskID != "" && config.StartDate != "" && !monRunning {
+			//	monRunning = true
+			//	monPage = 1
+			//	go pollAnnotations()
+			// }
 			b, _ := json.Marshal(config)
 			os.WriteFile(cfgPath, b, 0644)
 			st.SaveConfig(b)

@@ -188,8 +188,7 @@ chrome.runtime.onConnect.addListener(port => {
       return;
     }
     post('/api/monitor', msg);
-    if (msg.type === 'submission') { if (msg.question) ensureGroup(Number(msg.question) + 1); return; }
-    // Auto caching disabled — use manual refresh from desktop UI
+    // Auto caching fully disabled — use manual refresh from desktop UI
   });
 
   port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); });
