@@ -52,7 +52,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 .modal h3{font-size:16px;margin-bottom:12px}
 .capture{border-color:#14b8a6!important;background:#0f766e!important}
 .prelabel-layout{display:grid;grid-template-columns:minmax(260px,360px) 1fr;gap:14px}
-.prelabel-image{height:260px;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#08111f center/contain no-repeat}
+.prelabel-image{height:260px;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#08111f center/contain no-repeat;resize:both;overflow:hidden;min-height:120px;min-width:160px}
 .prelabel-meta{font-size:12px;color:#93a4bc;margin-top:8px;word-break:break-all}
 .label-group{margin-bottom:12px}
 .label-group-title{font-size:12px;color:#93a4bc;margin-bottom:6px}
@@ -65,7 +65,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 .floating-window .float-drag-bar button{font-size:11px;padding:2px 8px;background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:3px;cursor:pointer}
 .floating-window .float-body{padding:10px;min-height:150px}
 .floating-window .prelabel-layout{display:grid;grid-template-columns:minmax(200px,360px) 1fr;gap:10px}
-.floating-window .prelabel-image{height:200px}
+.floating-window .prelabel-image{height:200px;resize:both;overflow:hidden;min-height:100px;min-width:140px}
 .floating-window .prelabel-image.zoomed{height:60vh}
 /* Mouse wheel zoom levels */
 .prelabel-image.zoom-1{background-size:contain}
