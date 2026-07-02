@@ -310,6 +310,7 @@ var cachedImages=[],activePrelabel=null,prelabelLabels={},manualPrelabel=false,l
 var gridPage=1,gridPageSize=30,_lastCacheSnapshot='';
 var webSubmitQueue=[],webSubmitRunning=false,webSubmitTotal=0,webSubmitDone=0;
 var SUBMIT_POLL_INTERVAL=2000,SUBMIT_POLL_MAX=30,SUBMIT_STEP_DELAY=500,PRELABEL_STEP_DELAY=50,PRELABEL_BATCH_DELAY=150;
+var DIRECT_SUBMIT_MAX_WORKERS=2,DIRECT_SUBMIT_PROGRESS_INTERVAL=5;
 var MAX_RETRY=5,RETRY_DELAY=3000;
 var previewHotkey=localStorage.getItem('aminerPreviewHotkey')||'Z';
 var LABEL_COLORS={amazing:'#f97316',good:'#22c55e',normal:'#475569',bad:'#dc2626',nice:'#8b5cf6',watermark:'#2563eb',watermark_yes:'#2563eb',default:'#64748b'};
@@ -724,9 +725,52 @@ function flushSubmitQueue(){
   toast('提交队列已清空');
 }
 
+function buildDirectSubmitGroups(imgs,maxWorkers){
+  var totalSubmitCount=imgs.length;
+  var maxSubmitWorkers=Math.max(1,Number(maxWorkers)||1);
+  var submitWorkerCount=Math.min(maxSubmitWorkers,totalSubmitCount);
+  var submitGroupSize=Math.ceil(totalSubmitCount/submitWorkerCount);
+  var submitGroups=[];
+  for(var groupIndex=0;groupIndex<submitWorkerCount;groupIndex++){
+    var groupStartIndex=groupIndex*submitGroupSize;
+    var groupEndIndex=Math.min(groupStartIndex+submitGroupSize,totalSubmitCount);
+    if(groupStartIndex<groupEndIndex)submitGroups.push(imgs.slice(groupStartIndex,groupEndIndex));
+  }
+  return {total:totalSubmitCount,maxWorkers:maxSubmitWorkers,workerCount:submitWorkerCount,groupSize:submitGroupSize,groups:submitGroups};
+}
+
+async function submitDirectImage(img){
+  var r=await api('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hash:img.hash,labels:img.labels})});
+  if(r.ok){img.labelStatus='cloud_submitted';return {ok:true}}
+  console.error('submit failed:',r);
+  return {ok:false,message:r.body||r.status||'submit failed'};
+}
+
+async function requestDirectAPISubmitGrouped(imgs){
+  var submitPlan=buildDirectSubmitGroups(imgs,DIRECT_SUBMIT_MAX_WORKERS);
+  toast('Direct submit '+submitPlan.total+' images, groups='+submitPlan.workerCount+', groupSize='+submitPlan.groupSize+'...');
+  var ok=0,fail=0,done=0;
+  async function runGroup(group,workerIndex){
+    for(var itemIndex=0;itemIndex<group.length;itemIndex++){
+      var img=group[itemIndex];
+      try{
+        var result=await submitDirectImage(img);
+        if(result.ok)ok++;
+        else{fail++;toast('Failed: '+img.questionNum+' '+result.message,'#d94848')}
+      }catch(e){fail++;toast('Error: '+img.questionNum+' '+e.message,'#d94848')}
+      done++;
+      if(done===submitPlan.total||done%DIRECT_SUBMIT_PROGRESS_INTERVAL===0)toast('Direct submit '+done+'/'+submitPlan.total+' OK='+ok+' FAIL='+fail+' group='+(workerIndex+1));
+    }
+  }
+  await Promise.all(submitPlan.groups.map(function(group,workerIndex){return runGroup(group,workerIndex)}));
+  await refreshImages({sync:false});
+  toast('Direct submit done: OK='+ok+' FAIL='+fail);
+}
+
 async function requestDirectAPISubmit(all){
   var imgs=all?cachedImages.filter(isCompleted):selectedSlotImages('completed');
   imgs=imgs.filter(function(img){return img.labelText&&img.labelStatus!=='cloud_submitted'});
+  if(imgs.length)return requestDirectAPISubmitGrouped(imgs);
   if(!imgs.length)return toast(all?'已完成槽暂无可提交图片':'请先选择已完成图片','#d94848');
   toast('开始直接提交 '+imgs.length+' 张...');
   var ok=0,fail=0;
