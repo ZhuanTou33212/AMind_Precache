@@ -146,6 +146,8 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 <div class="panel" id="cacheSlotPanel">
   <h2>图片缓存槽 <span id="slotStats" class="stats"></span>
     <button class="btn" style="margin-left:12px;background:#6366f1;color:#fff" onclick="queryStats()">查询标注统计</button>
+    <input id="refreshFromQ" type="number" placeholder="题号" style="width:60px;margin-left:8px;background:#0b1220;color:#e5edf7;border:1px solid rgba(148,163,184,.3);border-radius:4px;padding:4px 6px;font-size:12px">
+    <button class="btn" style="background:#059669;color:#fff" onclick="refreshFromQ()">从指定题刷新</button>
   </h2>
   <div class="slot-layout">
     <div class="slot-panel" id="unlabeledSlot">
@@ -736,6 +738,17 @@ function flushSubmitQueue(){
   webSubmitQueue=[];webSubmitRunning=false;webSubmitTotal=0;webSubmitDone=0;
   $('#queueProgress').style.display='none';$('#flushQueueBtn').style.display='none';
   toast('提交队列已清空');
+}
+
+async function refreshFromQ(){
+  var q=parseInt($('#refreshFromQ').value)||0;
+  if(!q||q<1)return toast('请输入有效题号','#d94848');
+  try{
+    await api('/api/cache-clear');
+    await api('/api/cache-refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+    toast('已从Q'+q+'刷新缓存');
+    await refreshImages({sync:false});
+  }catch(e){toast('刷新失败: '+e.message,'#d94848')}
 }
 
 function buildDirectSubmitGroups(imgs,maxWorkers){
