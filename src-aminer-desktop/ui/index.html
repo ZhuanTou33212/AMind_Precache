@@ -515,18 +515,23 @@ function toggleFloatingWindow(){
   // Create floating window
   var fw=document.createElement('div');fw.className='floating-window';fw.id='floatingPrelabel';
   fw.style.left='100px';fw.style.top='60px';fw.style.width='680px';fw.style.height='520px';
-  var bar=document.createElement('div');bar.className='float-drag-bar';
-  bar.textContent='预标注窗口 - 拖拽移动 | 右下角拉动调整大小';
-  bar.addEventListener('mousedown',floatDragStart);
-  var btn=document.createElement('button');btn.textContent='嵌入回页面';btn.id='floatToggleBtn';
-  btn.onclick=function(e){e.stopPropagation();toggleFloatingWindow()};
-  bar.appendChild(btn);
-  fw.appendChild(bar);
-  // Move panel content into floating window
-  var body=document.createElement('div');body.className='float-body';
-  while(panel.firstChild)body.appendChild(panel.firstChild);
-  fw.appendChild(body);
-  document.body.appendChild(fw);
+    var bar=document.createElement('div');bar.className='float-drag-bar';
+    bar.textContent='预标注窗口 | 右键任意位置拖动 | 右下角拉缩放';
+    bar.addEventListener('mousedown',floatDragStart);
+    var btn=document.createElement('button');btn.textContent='嵌入回页面';btn.id='floatToggleBtn';
+    btn.onclick=function(e){e.stopPropagation();toggleFloatingWindow()};
+    bar.appendChild(btn);
+    fw.appendChild(bar);
+    // Move panel content into floating window
+    var body=document.createElement('div');body.className='float-body';
+    while(panel.firstChild)body.appendChild(panel.firstChild);
+    fw.appendChild(body);
+    // Right-click drag anywhere on window
+    fw.addEventListener('mousedown',function(e){
+      if(e.button===2){e.preventDefault();floatDragStart(e)}
+    });
+    fw.addEventListener('contextmenu',function(e){e.preventDefault()});
+    document.body.appendChild(fw);
   panel.style.display='none';
   floatingWindow=fw;
   renderPrelabel();
