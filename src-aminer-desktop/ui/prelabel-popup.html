@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>预标注独立窗口</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0b1220;color:#e5edf7;font:13px/1.5 system-ui,sans-serif;padding:12px;min-height:100vh}
+h2{font-size:14px;margin-bottom:8px;color:#14b8a6}
+.btn{display:inline-block;padding:5px 10px;border:1px solid rgba(148,163,184,.35);border-radius:5px;background:#172033;color:#e5edf7;font-size:12px;cursor:pointer;margin:2px}
+.btn:hover{background:#1e3050}
+.btn.primary{background:#14b8a6;color:#fff;border-color:#14b8a6}
+.btn.danger{background:#d94848;color:#fff;border-color:#d94848}
+.btn.active{background:#0f766e;border-color:#14b8a6}
+.badge{padding:4px 8px;border-radius:4px;background:#172033;font-size:11px;color:#93a4bc}
+.row{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap;align-items:center}
+.prelabel-image{border:1px solid rgba(148,163,184,.4);border-radius:6px;background:#08111f center/contain no-repeat;min-height:200px;resize:both;overflow:hidden;width:100%;height:320px}
+.prelabel-meta{font-size:11px;color:#93a4bc;margin:4px 0}
+.label-group{margin:4px 0}
+.label-group-title{font-size:11px;color:#93a4bc;margin-bottom:3px}
+.label-buttons{display:flex;gap:4px;flex-wrap:wrap}
+.select-line{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+#popupTitle{font-size:11px;color:#14b8a6;margin-bottom:4px}
+</style>
+</head>
+<body>
+<h2>预标注窗口</h2>
+<div id="popupTitle">等待加载...</div>
+<div class="row">
+  <button class="btn" onclick="followQuestion()">跟随当前题</button>
+  <button class="btn" onclick="prevLabeled()">上一张</button>
+  <button class="btn" onclick="nextLabeled()">下一张</button>
+  <button class="btn" onclick="toggleZoom()">放大/缩回</button>
+</div>
+<div class="prelabel-image" id="prelabelImage"></div>
+<div class="prelabel-meta" id="prelabelMeta"></div>
+<div id="prelabelLabels"></div>
+<div class="select-line">
+  <button class="btn primary" onclick="saveLabels()">保存标注</button>
+  <button class="btn danger" onclick="clearLabels()">清空标签</button>
+</div>
+<div class="prelabel-meta" id="prelabelText">当前标注: -</div>
+
+<script>
+var currentImg=null,labelsConfig=null,prelabels={},zoomOn=false;
+
+async function api(p){var r=await fetch(p);if(!r.ok)throw Error(await r.text());return r.json()}
+
+async function refresh(){
+  try{
+    var imgs=await api('/api/images');
+    var cfg=await api('/api/config');
+    var lbls=await api('/api/labels-config');
+    labelsConfig=lbls;
+    var qNum=0;
+    // Get current question from monitor
+    try{var ms=await api('/api/monitor-state');qNum=ms.question||0}catch(e){}
+    $('#popupTitle').textContent='任务: '+cfg.taskId+' | 题号: '+(qNum||'-');
+    // Find matching image
+    if(qNum)currentImg=(imgs||[]).find(function(i){return i.questionNum===qNum});
+    if(!currentImg&&imgs&&imgs.length)currentImg=imgs[0];
+    renderImage();
+  }catch(e){$('#popupTitle').textContent='错误: '+e.message}
+}
+
+function $(id){return document.getElementById(id)}
+
+function renderImage(){
+  var img=$('prelabelImage'),meta=$('prelabelMeta'),box=$('prelabelLabels'),txt=$('prelabelText');
+  if(!img)return;
+  if(currentImg){
+    img.style.backgroundImage='url(/api/image/'+currentImg.hash+')';
+    meta.textContent='Q'+currentImg.questionNum+' | '+(currentImg.promptId||'').slice(0,20);
+    prelabels=cloneObj(currentImg.labels||{});
+  }else{
+    img.style.backgroundImage='';meta.textContent='暂无图片';
+    prelabels={};
+  }
+  // Render label buttons
+  box.innerHTML='';
+  if(labelsConfig&&labelsConfig.groups)labelsConfig.groups.forEach(function(g){
+    var w=document.createElement('div');w.className='label-group';
+    var t=document.createElement('div');t.className='label-group-title';
+    t.textContent=g.name+(g.mode==='multi'?' 可多选':' 单选');
+    var b=document.createElement('div');b.className='label-buttons';
+    (g.options||[]).forEach(function(o){
+      var btn=document.createElement('button');btn.className='btn';
+      var sel=(prelabels[g.id]||[]).indexOf(o.label)>=0;
+      if(sel)btn.classList.add('active');
+      btn.textContent=o.label;
+      btn.onclick=function(){toggleLabel(g,o)};
+      b.appendChild(btn);
+    });
+    w.appendChild(t);w.appendChild(b);box.appendChild(w);
+  });
+  txt.textContent='当前标注: '+(labelText()||'-');
+}
+
+function cloneObj(o){try{return JSON.parse(JSON.stringify(o||{}))}catch(e){return{}}}
+
+function toggleLabel(group,option){
+  var arr=prelabels[group.id]||[];
+  if(group.mode==='multi'){
+    var i=arr.indexOf(option.label);
+    if(i>=0)arr.splice(i,1);else arr.push(option.label);
+  }else arr=[option.label];
+  prelabels[group.id]=arr;
+  renderImage();
+}
+
+function labelText(){
+  var parts=[];
+  if(labelsConfig)labelsConfig.groups.forEach(function(g){
+    (prelabels[g.id]||[]).forEach(function(v){parts.push(v)});
+  });
+  return parts.join('_');
+}
+
+async function saveLabels(){
+  if(!currentImg)return;
+  try{
+    await fetch('/api/image-labels',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({hash:currentImg.hash,labels:prelabels,questionNum:currentImg.questionNum})});
+    alert('已保存');
+    refresh();
+  }catch(e){alert('保存失败: '+e)}
+}
+
+async function clearLabels(){prelabels={};renderImage()}
+
+async function followQuestion(){refresh()}
+
+async function prevLabeled(){
+  var imgs=await api('/api/images');
+  var labeled=imgs.filter(function(i){return i.labelText});
+  if(!labeled.length)return;
+  var q=currentImg?currentImg.questionNum:1;
+  for(var i=labeled.length-1;i>=0;i--){if(labeled[i].questionNum<q){currentImg=labeled[i];break}};
+  renderImage();
+}
+
+async function nextLabeled(){
+  var imgs=await api('/api/images');
+  var labeled=imgs.filter(function(i){return i.labelText});
+  if(!labeled.length)return;
+  var q=currentImg?currentImg.questionNum:0;
+  for(var i=0;i<labeled.length;i++){if(labeled[i].questionNum>q){currentImg=labeled[i];break}};
+  renderImage();
+}
+
+function toggleZoom(){
+  zoomOn=!zoomOn;
+  var img=$('prelabelImage');
+  if(zoomOn){img.style.height='min(90vh,800px)';img.classList.add('zoomed')}
+  else{img.style.height='320px';img.classList.remove('zoomed')}
+}
+
+refresh();setInterval(refresh,3000);
+</script>
+</body>
+</html>

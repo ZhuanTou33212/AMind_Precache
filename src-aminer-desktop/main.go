@@ -357,6 +357,20 @@ func pinTopmostSoon() {
 	}()
 }
 
+func pinTopmostByTitle(title string) {
+	cb := syscall.NewCallback(func(h syscall.Handle, p uintptr) uintptr {
+		buf := make([]uint16, 512)
+		procGetWindowTextW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		t := syscall.UTF16ToString(buf)
+		if strings.Contains(t, title) {
+			procSetWindowPos.Call(uintptr(h), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW)
+			return 0
+		}
+		return 1
+	})
+	procEnumWindows.Call(cb, 0)
+}
+
 func main() {
 	exeDir, _ := os.Executable()
 	dataDir = filepath.Join(filepath.Dir(exeDir), "data")
@@ -1379,6 +1393,29 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "question": req.Question})
+	})
+
+	// Open prelabel popup as separate always-on-top Edge window
+	mux.HandleFunc("/api/prelabel-popup", func(w http.ResponseWriter, r *http.Request) {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			for _, p := range []string{
+				"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+				"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+			} {
+				if _, err := os.Stat(p); err == nil {
+					cmd := exec.Command(p, "--app=http://127.0.0.1:9800/prelabel-popup.html", "--window-size=480,680")
+					cmd.Start()
+					// Pin to top after launch
+					go func() {
+						time.Sleep(1500 * time.Millisecond)
+						pinTopmostByTitle("预标注独立窗口")
+					}()
+					return
+				}
+			}
+		}()
+		w.Write([]byte(`{"ok":true}`))
 	})
 
 	uiSub, _ := fs.Sub(uiFS, "ui")

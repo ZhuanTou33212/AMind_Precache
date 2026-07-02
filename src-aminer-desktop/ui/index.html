@@ -128,6 +128,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 <div class="panel" id="prelabelPanel">
   <h2>预标注窗口 <span id="layerStats" class="stats"></span>
     <button class="btn" style="background:#14b8a6;color:#fff;margin-left:8px" onclick="toggleFloatingWindow()">弹出为独立窗口</button>
+    <button class="btn" style="background:#7c3aed;color:#fff;margin-left:4px" onclick="openPrelabelPopup()">桌面置顶窗口</button>
   </h2>
   <div class="row">
     <span class="badge" id="monitorBadge">当前题号: -</span>
@@ -545,6 +546,10 @@ function floatDragMove(e){
   floatingWindow.style.top=(floatDrag.y+e.clientY-floatDrag.oy)+'px';
 }
 function floatDragEnd(){floatDrag.active=false;document.removeEventListener('mousemove',floatDragMove);document.removeEventListener('mouseup',floatDragEnd)}
+
+async function openPrelabelPopup(){
+  try{await api('/api/prelabel-popup');toast('独立置顶窗口已打开')}catch(e){toast('打开失败: '+e.message,'#d94848')}
+}
 
 window.addEventListener('keydown',function(e){
   if(capturingPreviewKey){
