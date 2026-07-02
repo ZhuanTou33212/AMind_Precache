@@ -59,6 +59,13 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 .label-buttons{display:flex;gap:8px;flex-wrap:wrap}
 .select-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
 .prelabel-image.zoomed{height:min(72vh,680px);position:relative;z-index:5;background-color:#020617;border-color:#14b8a6}
+/* Floating window */
+.floating-window{position:fixed;z-index:200;background:#111827;border:2px solid #14b8a6;border-radius:8px;min-width:320px;min-height:200px;resize:both;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.floating-window .float-drag-bar{background:#0f766e;color:#fff;padding:6px 10px;cursor:move;display:flex;align-items:center;justify-content:space-between;user-select:none;border-radius:6px 6px 0 0;font-size:12px}
+.floating-window .float-drag-bar button{font-size:11px;padding:2px 8px;background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:3px;cursor:pointer}
+.floating-window .float-body{padding:10px;min-height:150px}
+.floating-window .prelabel-layout{display:grid;grid-template-columns:minmax(200px,360px) 1fr;gap:10px}
+.floating-window .prelabel-image{height:200px}
 .slot-layout{display:grid;grid-template-columns:1fr;gap:12px}
 .slot-panel{border:1px solid rgba(148,163,184,.22);border-radius:8px;background:#08111f;padding:10px}
 .slot-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
@@ -110,7 +117,9 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 </div>
 
 <div class="panel" id="prelabelPanel">
-  <h2>预标注窗口 <span id="layerStats" class="stats"></span></h2>
+  <h2>预标注窗口 <span id="layerStats" class="stats"></span>
+    <button class="btn" style="background:#14b8a6;color:#fff;margin-left:8px" onclick="toggleFloatingWindow()">弹出为独立窗口</button>
+  </h2>
   <div class="row">
     <span class="badge" id="monitorBadge">当前题号: -</span>
     <button class="btn" onclick="followCurrentQuestion()">跟随当前题</button>
@@ -452,8 +461,62 @@ function finishPreviewKeyCapture(key){
 
 function togglePreviewZoom(){
   previewZoomed=!previewZoomed;
-  $('#prelabelImage').classList.toggle('zoomed',previewZoomed);
+  var img=document.querySelector('#floatingPrelabel .prelabel-image')||$('#prelabelImage');
+  if(img)img.classList.toggle('zoomed',previewZoomed);
 }
+
+// Floating window for prelabel panel
+var floatingWindow=null,floatDrag={x:0,y:0,ox:0,oy:0,active:false};
+
+function toggleFloatingWindow(){
+  var panel=$('#prelabelPanel');
+  if(floatingWindow){
+    // Move content back to original panel
+    var body=floatingWindow.querySelector('.float-body');
+    if(body){
+      while(body.firstChild)panel.appendChild(body.firstChild);
+    }
+    floatingWindow.parentNode&&floatingWindow.parentNode.removeChild(floatingWindow);
+    floatingWindow=null;
+    panel.style.display='';
+    $('#floatToggleBtn')&&($('#floatToggleBtn').textContent='弹出为独立窗口');
+    renderPrelabel();
+    return;
+  }
+  // Create floating window
+  var fw=document.createElement('div');fw.className='floating-window';fw.id='floatingPrelabel';
+  fw.style.left='100px';fw.style.top='60px';fw.style.width='680px';fw.style.height='520px';
+  var bar=document.createElement('div');bar.className='float-drag-bar';
+  bar.textContent='预标注窗口 - 拖拽移动 | 右下角拉动调整大小';
+  bar.addEventListener('mousedown',floatDragStart);
+  var btn=document.createElement('button');btn.textContent='嵌入回页面';btn.id='floatToggleBtn';
+  btn.onclick=function(e){e.stopPropagation();toggleFloatingWindow()};
+  bar.appendChild(btn);
+  fw.appendChild(bar);
+  // Move panel content into floating window
+  var body=document.createElement('div');body.className='float-body';
+  while(panel.firstChild)body.appendChild(panel.firstChild);
+  fw.appendChild(body);
+  document.body.appendChild(fw);
+  panel.style.display='none';
+  floatingWindow=fw;
+  renderPrelabel();
+}
+
+function floatDragStart(e){
+  floatDrag.active=true;floatDrag.ox=e.clientX;floatDrag.oy=e.clientY;
+  var r=floatingWindow.getBoundingClientRect();
+  floatDrag.x=r.left;floatDrag.y=r.top;
+  document.addEventListener('mousemove',floatDragMove);
+  document.addEventListener('mouseup',floatDragEnd);
+  e.preventDefault();
+}
+function floatDragMove(e){
+  if(!floatDrag.active)return;
+  floatingWindow.style.left=(floatDrag.x+e.clientX-floatDrag.ox)+'px';
+  floatingWindow.style.top=(floatDrag.y+e.clientY-floatDrag.oy)+'px';
+}
+function floatDragEnd(){floatDrag.active=false;document.removeEventListener('mousemove',floatDragMove);document.removeEventListener('mouseup',floatDragEnd)}
 
 window.addEventListener('keydown',function(e){
   if(capturingPreviewKey){
