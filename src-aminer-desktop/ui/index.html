@@ -51,8 +51,10 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 .modal{width:min(460px,100%);background:#111827;border:1px solid rgba(148,163,184,.28);border-radius:8px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.35)}
 .modal h3{font-size:16px;margin-bottom:12px}
 .capture{border-color:#14b8a6!important;background:#0f766e!important}
-.prelabel-layout{display:grid;grid-template-columns:minmax(260px,360px) 1fr;gap:14px}
-.prelabel-image{height:260px;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#08111f center/contain no-repeat;resize:both;overflow:hidden;min-height:120px;min-width:160px}
+.prelabel-layout{display:flex;flex-wrap:wrap;gap:10px}
+.prelabel-layout>div:first-child{flex:1 1 260px;min-width:200px}
+.prelabel-layout>div:last-child{flex:1 1 200px;min-width:180px}
+.prelabel-image{height:260px;width:100%;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#08111f center/contain no-repeat;resize:both;overflow:hidden;min-height:120px;min-width:160px}
 .prelabel-meta{font-size:12px;color:#93a4bc;margin-top:8px;word-break:break-all}
 .label-group{margin-bottom:12px}
 .label-group-title{font-size:12px;color:#93a4bc;margin-bottom:6px}
@@ -63,9 +65,13 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 .floating-window{position:fixed;z-index:200;background:#111827;border:2px solid #14b8a6;border-radius:8px;min-width:320px;min-height:200px;resize:both;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .floating-window .float-drag-bar{background:#0f766e;color:#fff;padding:6px 10px;cursor:move;display:flex;align-items:center;justify-content:space-between;user-select:none;border-radius:6px 6px 0 0;font-size:12px}
 .floating-window .float-drag-bar button{font-size:11px;padding:2px 8px;background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:3px;cursor:pointer}
-.floating-window .float-body{padding:10px;min-height:150px}
-.floating-window .prelabel-layout{display:grid;grid-template-columns:minmax(200px,360px) 1fr;gap:10px}
-.floating-window .prelabel-image{height:200px;resize:both;overflow:hidden;min-height:100px;min-width:140px}
+.floating-window .float-body{padding:8px;min-height:120px;overflow:auto}
+.floating-window .prelabel-layout{display:flex;flex-wrap:wrap;gap:8px}
+.floating-window .prelabel-layout>div:first-child{flex:1 1 200px;min-width:160px}
+.floating-window .prelabel-layout>div:last-child{flex:1 1 160px;min-width:140px}
+.floating-window .prelabel-image{height:200px;width:100%;resize:both;overflow:hidden;min-height:80px;min-width:120px}
+.floating-window .row{flex-wrap:wrap;gap:4px}
+.floating-window .btn{font-size:11px;padding:3px 8px}
 .floating-window .prelabel-image.zoomed{height:60vh}
 /* Mouse wheel zoom levels */
 .prelabel-image.zoom-1{background-size:contain}
