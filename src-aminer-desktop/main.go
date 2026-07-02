@@ -1495,6 +1495,9 @@ func extractOSSURL(reply string) string {
 
 func rebuildCacheFrom(startQ, maxImages int, done <-chan struct{}) {
 	log.Printf("[CACHE] Rebuilding from Q%d (max %d)...", startQ, maxImages)
+	if config.Token == "" { log.Printf("[CACHE] ABORT: no token"); return }
+	if config.TaskID == "" { log.Printf("[CACHE] ABORT: no taskId"); return }
+	if config.StartDate == "" { log.Printf("[CACHE] ABORT: no startDate"); return }
 	page := (startQ-1)/20 + 1
 	cached := 0
 	for cached < maxImages {
@@ -1504,9 +1507,10 @@ func rebuildCacheFrom(startQ, maxImages int, done <-chan struct{}) {
 			return
 		default:
 		}
-		resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
-			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
-		if err != nil { break }
+		promptsURL := annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page)
+		resp, err := doAMinerGet(promptsURL)
+		if err != nil { log.Printf("[CACHE] Page %d error: %v", page, err); break }
 		var data struct {
 			Prompts []struct{
 				PromptID string `json:"prompt_id"`
@@ -1515,7 +1519,8 @@ func rebuildCacheFrom(startQ, maxImages int, done <-chan struct{}) {
 			PageSize int `json:"page_size"`
 		}
 		body, _ := io.ReadAll(resp.Body); resp.Body.Close()
-		if json.Unmarshal(body, &data) != nil || len(data.Prompts) == 0 { break }
+		if json.Unmarshal(body, &data) != nil || len(data.Prompts) == 0 { log.Printf("[CACHE] Page %d: no prompts or bad json", page); break }
+		log.Printf("[CACHE] Page %d: %d prompts, pageSize=%d", page, len(data.Prompts), data.PageSize)
 		qBase := (page-1)*data.PageSize + 1
 		startIdx := 0
 		if page == (startQ-1)/20+1 { startIdx = startQ - qBase }
