@@ -148,6 +148,7 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
     <button class="btn" style="margin-left:12px;background:#6366f1;color:#fff" onclick="queryStats()">查询标注统计</button>
     <input id="refreshFromQ" type="number" placeholder="题号" style="width:60px;margin-left:8px;background:#0b1220;color:#e5edf7;border:1px solid rgba(148,163,184,.3);border-radius:4px;padding:4px 6px;font-size:12px">
     <button class="btn" style="background:#059669;color:#fff" onclick="refreshFromQ()">从指定题刷新</button>
+    <button class="btn danger" style="margin-left:4px" onclick="stopCache()">停止缓存</button>
   </h2>
   <div class="slot-layout">
     <div class="slot-panel" id="unlabeledSlot">
@@ -748,6 +749,10 @@ async function refreshFromQ(){
     toast('正在从Q'+q+'重建缓存...');
     await refreshImages({sync:false});
   }catch(e){toast('刷新失败: '+e.message,'#d94848')}
+}
+
+async function stopCache(){
+  try{await api('/api/cache-stop');toast('缓存已停止')}catch(e){toast('停止失败: '+e.message,'#d94848')}
 }
 
 function buildDirectSubmitGroups(imgs,maxWorkers){

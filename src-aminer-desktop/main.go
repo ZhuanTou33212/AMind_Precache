@@ -1362,6 +1362,10 @@ func main() {
 		st.ClearAnnotations()
 		w.Write([]byte(`{"ok":true}`))
 	})
+	mux.HandleFunc("/api/cache-stop", func(w http.ResponseWriter, r *http.Request) {
+		if cacheCancel != nil { cacheCancel(); cacheCancel = nil; log.Printf("[CACHE] Rebuild stopped") }
+		w.Write([]byte(`{"ok":true}`))
+	})
 	mux.HandleFunc("/api/cache-refresh", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Question int `json:"question"` }
 		if r.Method == "POST" { json.NewDecoder(r.Body).Decode(&req) }
