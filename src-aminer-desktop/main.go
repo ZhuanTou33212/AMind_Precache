@@ -1354,7 +1354,10 @@ func main() {
 
 	// Manual cache control
 	var cacheMax = 200
+	var cacheCancel func() // cancels current rebuild goroutine
+
 	mux.HandleFunc("/api/cache-clear", func(w http.ResponseWriter, r *http.Request) {
+		if cacheCancel != nil { cacheCancel() }
 		for _, img := range st.ListImages() { st.DeleteImage(img.Hash) }
 		st.ClearAnnotations()
 		w.Write([]byte(`{"ok":true}`))
@@ -1363,9 +1366,12 @@ func main() {
 		var req struct{ Question int `json:"question"` }
 		if r.Method == "POST" { json.NewDecoder(r.Body).Decode(&req) }
 		if req.Question > 0 {
+			if cacheCancel != nil { cacheCancel() } // Stop any running rebuild
 			for _, img := range st.ListImages() { st.DeleteImage(img.Hash) }
 			log.Printf("[CACHE] Cleared, rebuilding from Q%d", req.Question)
-			go rebuildCacheFrom(req.Question, cacheMax)
+			done := make(chan struct{})
+			cacheCancel = func() { close(done) }
+			go rebuildCacheFrom(req.Question, cacheMax, done)
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "question": req.Question})
@@ -1445,11 +1451,17 @@ func extractOSSURL(reply string) string {
 	return reply[start : start+j]
 }
 
-func rebuildCacheFrom(startQ, maxImages int) {
+func rebuildCacheFrom(startQ, maxImages int, done <-chan struct{}) {
 	log.Printf("[CACHE] Rebuilding from Q%d (max %d)...", startQ, maxImages)
 	page := (startQ-1)/20 + 1
 	cached := 0
 	for cached < maxImages {
+		select {
+		case <-done:
+			log.Printf("[CACHE] Cancelled at Q%d after %d images", startQ, cached)
+			return
+		default:
+		}
 		resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
 			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
 		if err != nil { break }
@@ -1466,6 +1478,10 @@ func rebuildCacheFrom(startQ, maxImages int) {
 		startIdx := 0
 		if page == (startQ-1)/20+1 { startIdx = startQ - qBase }
 		for i := startIdx; i < len(data.Prompts) && cached < maxImages; i++ {
+			select {
+			case <-done: return
+			default:
+			}
 			p := data.Prompts[i]
 			if p.State == 1 { continue }
 			qn := qBase + i
