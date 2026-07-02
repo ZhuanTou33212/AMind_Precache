@@ -1353,6 +1353,7 @@ func main() {
 	})
 
 	// Manual cache control
+	var cacheMax = 200
 	mux.HandleFunc("/api/cache-clear", func(w http.ResponseWriter, r *http.Request) {
 		for _, img := range st.ListImages() { st.DeleteImage(img.Hash) }
 		st.ClearAnnotations()
@@ -1363,7 +1364,8 @@ func main() {
 		if r.Method == "POST" { json.NewDecoder(r.Body).Decode(&req) }
 		if req.Question > 0 {
 			for _, img := range st.ListImages() { st.DeleteImage(img.Hash) }
-			log.Printf("[CACHE] Cleared, will rebuild from Q%d", req.Question)
+			log.Printf("[CACHE] Cleared, rebuilding from Q%d", req.Question)
+			go rebuildCacheFrom(req.Question, cacheMax)
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "question": req.Question})
@@ -1432,6 +1434,61 @@ func genUUID() string {
 func mustAtoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+func extractOSSURL(reply string) string {
+	i := strings.Index(reply, "![img](")
+	if i < 0 { return "" }
+	start := i + 7
+	j := strings.Index(reply[start:], ")")
+	if j < 0 { return "" }
+	return reply[start : start+j]
+}
+
+func rebuildCacheFrom(startQ, maxImages int) {
+	log.Printf("[CACHE] Rebuilding from Q%d (max %d)...", startQ, maxImages)
+	page := (startQ-1)/20 + 1
+	cached := 0
+	for cached < maxImages {
+		resp, err := doAMinerGet(annotBase() + "/api/v1/annotations/annot/prompts/task/" + config.TaskID +
+			"/date/" + config.StartDate + "/v2?page=" + strconv.Itoa(page))
+		if err != nil { break }
+		var data struct {
+			Prompts []struct{
+				PromptID string `json:"prompt_id"`
+				State    int    `json:"state"`
+			} `json:"prompts"`
+			PageSize int `json:"page_size"`
+		}
+		body, _ := io.ReadAll(resp.Body); resp.Body.Close()
+		if json.Unmarshal(body, &data) != nil || len(data.Prompts) == 0 { break }
+		qBase := (page-1)*data.PageSize + 1
+		startIdx := 0
+		if page == (startQ-1)/20+1 { startIdx = startQ - qBase }
+		for i := startIdx; i < len(data.Prompts) && cached < maxImages; i++ {
+			p := data.Prompts[i]
+			if p.State == 1 { continue }
+			qn := qBase + i
+			qResp, err := doAMinerGet(annotBase() + "/api/v1/bench/questions/" + p.PromptID + "?uid=")
+			if err != nil { continue }
+			var qData struct {
+				Responses []struct{ Reply string `json:"reply"` } `json:"responses"`
+			}
+			qb, _ := io.ReadAll(qResp.Body); qResp.Body.Close()
+			json.Unmarshal(qb, &qData)
+			for _, rp := range qData.Responses {
+				u := extractOSSURL(rp.Reply)
+				if u != "" {
+					if _, err := st.CacheImage(u, p.PromptID, qn, "manual"); err == nil {
+						cached++
+					}
+					break
+				}
+			}
+		}
+		page++
+	}
+	log.Printf("[CACHE] Done: %d images cached from Q%d", cached, startQ)
 }
 
 func syncAllAnnotations() {

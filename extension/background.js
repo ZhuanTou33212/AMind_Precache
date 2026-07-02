@@ -200,6 +200,13 @@ chrome.runtime.onConnect.addListener(port => {
       try { ensureGroup(1); } catch(e) {}
     }
   }, 8000);
+  // If a question event comes in before auto-cache fires, cancel it
+  const origListener = port.onMessage.listeners[0];
+  port.onMessage.addListener(function cancelAuto(msg) {
+    if ((msg.question || msg.type === 'submission') && autoCacheTimer) {
+      clearTimeout(autoCacheTimer); autoCacheTimer = null;
+    }
+  });
 
   port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); clearTimeout(autoCacheTimer); });
 });

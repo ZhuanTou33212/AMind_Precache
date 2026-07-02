@@ -744,9 +744,8 @@ async function refreshFromQ(){
   var q=parseInt($('#refreshFromQ').value)||0;
   if(!q||q<1)return toast('请输入有效题号','#d94848');
   try{
-    await api('/api/cache-clear');
     await api('/api/cache-refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
-    toast('已从Q'+q+'刷新缓存');
+    toast('正在从Q'+q+'重建缓存...');
     await refreshImages({sync:false});
   }catch(e){toast('刷新失败: '+e.message,'#d94848')}
 }
