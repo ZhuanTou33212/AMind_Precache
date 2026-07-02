@@ -66,6 +66,13 @@ input,select{background:#0b1220;border:1px solid rgba(148,163,184,.3);border-rad
 .floating-window .float-body{padding:10px;min-height:150px}
 .floating-window .prelabel-layout{display:grid;grid-template-columns:minmax(200px,360px) 1fr;gap:10px}
 .floating-window .prelabel-image{height:200px}
+.floating-window .prelabel-image.zoomed{height:60vh}
+/* Mouse wheel zoom levels */
+.prelabel-image.zoom-1{background-size:contain}
+.prelabel-image.zoom-2{background-size:cover}
+.prelabel-image.zoom-3{background-size:150%}
+.prelabel-image.zoom-4{background-size:200%}
+.prelabel-image.zoom-5{background-size:300%}
 .slot-layout{display:grid;grid-template-columns:1fr;gap:12px}
 .slot-panel{border:1px solid rgba(148,163,184,.22);border-radius:8px;background:#08111f;padding:10px}
 .slot-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
@@ -464,6 +471,27 @@ function togglePreviewZoom(){
   var img=document.querySelector('#floatingPrelabel .prelabel-image')||$('#prelabelImage');
   if(img)img.classList.toggle('zoomed',previewZoomed);
 }
+
+var previewZoomLevel=1;
+function handleImageWheel(e){
+  if(!e.ctrlKey)return;
+  e.preventDefault();
+  if(e.deltaY<0)previewZoomLevel=Math.min(5,previewZoomLevel+1);
+  else previewZoomLevel=Math.max(1,previewZoomLevel-1);
+  e.currentTarget.className=e.currentTarget.className.replace(/\s*zoom-\d/g,'');
+  if(previewZoomLevel>1)e.currentTarget.classList.add('zoom-'+previewZoomLevel);
+}
+// Attach to both original and floating window images
+document.addEventListener('wheel',function(e){
+  if(!e.ctrlKey)return;
+  var el=e.target.closest('.prelabel-image');
+  if(!el)return;
+  e.preventDefault();
+  if(e.deltaY<0)previewZoomLevel=Math.min(5,previewZoomLevel+1);
+  else previewZoomLevel=Math.max(1,previewZoomLevel-1);
+  el.className=el.className.replace(/\s*zoom-\d/g,'');
+  if(previewZoomLevel>1)el.classList.add('zoom-'+previewZoomLevel);
+},{passive:false});
 
 // Floating window for prelabel panel
 var floatingWindow=null,floatDrag={x:0,y:0,ox:0,oy:0,active:false};
