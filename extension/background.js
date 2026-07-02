@@ -192,21 +192,5 @@ chrome.runtime.onConnect.addListener(port => {
     if (msg.question) ensureGroup(Number(msg.question));
   });
 
-  // Auto-start caching for label_page_customize (KB-SDK doesn't report question numbers)
-  let autoCacheTimer = setTimeout(async () => {
-    const imgs = await api('/api/images').catch(() => []);
-    if ((!imgs || !imgs.length) && groupSize > 0) {
-      console.log('[BG] Auto-start caching from Q1');
-      try { ensureGroup(1); } catch(e) {}
-    }
-  }, 8000);
-  // If a question event comes in before auto-cache fires, cancel it
-  const origListener = port.onMessage.listeners[0];
-  port.onMessage.addListener(function cancelAuto(msg) {
-    if ((msg.question || msg.type === 'submission') && autoCacheTimer) {
-      clearTimeout(autoCacheTimer); autoCacheTimer = null;
-    }
-  });
-
-  port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); clearTimeout(autoCacheTimer); });
+  port.onDisconnect.addListener(() => { clearInterval(ci); clearInterval(pi); });
 });
