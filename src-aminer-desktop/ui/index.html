@@ -338,6 +338,19 @@ function cloneLabels(labels){
   });
   return next;
 }
+function mergeLabels(base,overlay){
+  var next=cloneLabels(base);
+  Object.keys(overlay||{}).forEach(function(k){
+    if(Array.isArray(overlay[k])&&overlay[k].length)next[k]=overlay[k].slice();
+    else delete next[k];
+  });
+  return next;
+}
+function previewLabelsForImage(img){
+  if(!img)return {};
+  var slotLabels=(slotImageLabels[activePreviewSlot]&&slotImageLabels[activePreviewSlot][img.hash])||{};
+  return mergeLabels(img.labels,slotLabels);
+}
 
 function isLabeled(img){return !!(img&&(img.labelText||img.labelStatus==='labeled'||img.labelStatus==='submitted'))}
 function isUnlabeled(img){return !!(img&&!img.labelText&&img.labelStatus!=='labeled'&&img.labelStatus!=='submitted')}
@@ -626,7 +639,7 @@ async function confirmSlotSelection(slot){
   var count=0;
   if(slot==='unlabeled'){
     for(var i=0;i<imgs.length;i++){
-      var lbls=cloneLabels(slotImageLabels[slot][imgs[i].hash]||{});
+      var lbls=mergeLabels(imgs[i].labels,slotImageLabels[slot][imgs[i].hash]||{});
       if(!labelTextFrom(lbls))continue;
       await applyLabelsToImage(imgs[i],lbls);
       delete slotImageLabels[slot][imgs[i].hash];
@@ -639,7 +652,7 @@ async function confirmSlotSelection(slot){
   }else if(slot==='preconfirm'){
     for(var j=0;j<imgs.length;j++){
       var override=cloneLabels(slotImageLabels[slot][imgs[j].hash]||{});
-      if(Object.keys(override).length)await applyLabelsToImage(imgs[j],override);
+      if(Object.keys(override).length)await applyLabelsToImage(imgs[j],mergeLabels(imgs[j].labels,override));
       await updateImageStatus(imgs[j],'submitted','local confirmed');
       delete slotImageLabels[slot][imgs[j].hash];
       count++;
@@ -659,7 +672,7 @@ async function submitAllPreconfirm(){
     // Save slot labels if assigned (defensive: prevents label loss when user labeled via slot click)
     var slotLabels=cloneLabels(slotImageLabels.preconfirm[imgs[i].hash]||{});
     if(Object.keys(slotLabels).length){
-      try{await applyLabelsToImage(imgs[i],slotLabels)}catch(e){}
+      try{await applyLabelsToImage(imgs[i],mergeLabels(imgs[i].labels,slotLabels))}catch(e){}
       delete slotImageLabels.preconfirm[imgs[i].hash];
     }
     await updateImageStatus(imgs[i],'submitted','local batch');
@@ -1100,7 +1113,7 @@ function renderPrelabelSelectors(){
 function selectPrelabelImage(img, manual){
   activePrelabel=img||null;
   manualPrelabel=!!manual;
-  prelabelLabels=cloneLabels(activePrelabel&&activePrelabel.labels);
+  prelabelLabels=previewLabelsForImage(activePrelabel);
   prelabelDirty=false;
   renderPrelabel();
 }
@@ -1180,6 +1193,7 @@ async function savePrelabelLabels(){
   if(!activePrelabel)return toast('预标注窗口暂无图片','#d94848');
   var body={hash:activePrelabel.hash,promptId:activePrelabel.promptId,questionNum:activePrelabel.questionNum,labels:cloneLabels(prelabelLabels)};
   await api('/api/image-labels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(slotImageLabels[activePreviewSlot])delete slotImageLabels[activePreviewSlot][activePrelabel.hash];
   prelabelDirty=false;
   toast('已保存 '+imageTitle(activePrelabel)+'：'+(labelTextFrom(prelabelLabels)||'已清空'));
   var q=Number(activePrelabel.questionNum||0);
