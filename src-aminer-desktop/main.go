@@ -1559,7 +1559,9 @@ func applyLabelsToPayload(payload map[string]interface{}, labels map[string][]st
 			case "quality":
 				payload["level"] = coercePayloadValue(payload["level"], num)
 			case "watermark":
-				payload["watermark"] = coercePayloadValue(payload["watermark"], num)
+				// The AMiner template defines watermark as radio_allow_clear with numeric option value 1.
+				// Keep it scalar so the remote parser does not receive string/bool/array variants.
+				payload["watermark"] = num
 			}
 		}
 	}

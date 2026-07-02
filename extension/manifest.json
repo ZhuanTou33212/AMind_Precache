@@ -1,13 +1,15 @@
 {
     "manifest_version":  3,
     "name":  "AMiner Realtime Monitor Bridge",
-    "version":  "1.16",
+    "version":  "1.26",
     "permissions":  [
                         "storage",
                         "tabs"
                     ],
     "host_permissions":  [
-                             "http://127.0.0.1:9800/*"
+                             "http://127.0.0.1:9800/*",
+                             "https://annot.aminer.cn/*",
+                             "https://dhbd-ai-mas.cn-bj.ufileos.com/*"
                          ],
     "background":  {
                        "service_worker":  "background.js"
@@ -17,6 +19,7 @@
                                 "matches":  [
                                                 "https://annot.aminer.cn/project/label_page_feed/*",
                                                 "https://annot.aminer.cn/project/label_page_customize/*",
+                                                "https://dhbd-ai-mas.cn-bj.ufileos.com/open-ab/*",
                                                 "http://10.9.172.235:13000/project/label_page_feed/*",
                                                 "http://10.9.172.235:13000/project/label_page_customize/*"
                                             ],
@@ -24,12 +27,14 @@
                                            "monitor.js",
                                            "monitor-quicklabel.js"
                                        ],
-                                "run_at":  "document_start"
+                                "run_at":  "document_start",
+                                "all_frames":  true
                             },
                             {
                                 "matches":  [
                                                 "https://annot.aminer.cn/project/label_page_feed/*",
                                                 "https://annot.aminer.cn/project/label_page_customize/*",
+                                                "https://dhbd-ai-mas.cn-bj.ufileos.com/open-ab/*",
                                                 "http://10.9.172.235:13000/project/label_page_feed/*",
                                                 "http://10.9.172.235:13000/project/label_page_customize/*"
                                             ],
@@ -37,6 +42,7 @@
                                            "monitor-main.js"
                                        ],
                                 "run_at":  "document_start",
+                                "all_frames":  true,
                                 "world":  "MAIN"
                             }
                         ]
