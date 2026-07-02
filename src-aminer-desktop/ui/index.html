@@ -526,11 +526,11 @@ function toggleFloatingWindow(){
     var body=document.createElement('div');body.className='float-body';
     while(panel.firstChild)body.appendChild(panel.firstChild);
     fw.appendChild(body);
-    // Right-click drag anywhere on window
+    // Right-click drag + block page gestures
     fw.addEventListener('mousedown',function(e){
-      if(e.button===2){e.preventDefault();floatDragStart(e)}
-    });
-    fw.addEventListener('contextmenu',function(e){e.preventDefault()});
+      if(e.button===2){e.preventDefault();e.stopPropagation();floatDragStart(e)}
+    },true);
+    fw.addEventListener('contextmenu',function(e){e.preventDefault();e.stopPropagation()},true);
     document.body.appendChild(fw);
   panel.style.display='none';
   floatingWindow=fw;
