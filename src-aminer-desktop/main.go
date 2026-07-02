@@ -1352,6 +1352,23 @@ func main() {
 		}
 	})
 
+	// Manual cache control
+	mux.HandleFunc("/api/cache-clear", func(w http.ResponseWriter, r *http.Request) {
+		for _, img := range st.ListImages() { st.DeleteImage(img.Hash) }
+		st.ClearAnnotations()
+		w.Write([]byte(`{"ok":true}`))
+	})
+	mux.HandleFunc("/api/cache-refresh", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Question int `json:"question"` }
+		if r.Method == "POST" { json.NewDecoder(r.Body).Decode(&req) }
+		if req.Question > 0 {
+			for _, img := range st.ListImages() { st.DeleteImage(img.Hash) }
+			log.Printf("[CACHE] Cleared, will rebuild from Q%d", req.Question)
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "question": req.Question})
+	})
+
 	uiSub, _ := fs.Sub(uiFS, "ui")
 	uiHandler := http.FileServer(http.FS(uiSub))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
